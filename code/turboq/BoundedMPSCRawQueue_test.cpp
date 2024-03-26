@@ -1,0 +1,54 @@
+// Copyright (c) Sergey Kovalevich <inndie@gmail.com>
+// SPDX-License-Identifier: GPL-3.0-or-later
+
+#include <algorithm>
+#include <string>
+
+#include <doctest/doctest.h>
+
+#include "BoundedMPSCRawQueue.h"
+
+#include "concepts.h"
+
+static auto const options = turboq::BoundedMPSCRawQueue::CreationOptions(512, 1000);
+
+TEST_CASE("BoundedMPSCRawQueue: multipleMessages0") {
+  REQUIRE(sizeof(char) == sizeof(std::byte));
+
+  turboq::BoundedMPSCRawQueue queue("test", options, turboq::AnonymousMemorySource());
+
+  auto producer = queue.createProducer();
+  static_assert(turboq::Producer<decltype(producer)>);
+
+  auto consumer = queue.createConsumer();
+  static_assert(turboq::Consumer<decltype(consumer)>);
+
+  REQUIRE(producer);
+  REQUIRE(consumer);
+
+  std::string data(256, 'a');
+
+  auto send = [&producer, &data] {
+    auto buffer = producer.prepare(data.size());
+    REQUIRE(!buffer.empty());
+    std::copy(data.begin(), data.end(), std::bit_cast<char*>(buffer.data()));
+    producer.commit();
+  };
+
+  auto recv = [&consumer, &data] {
+    auto buffer = consumer.fetch();
+    REQUIRE(!buffer.empty());
+    std::string str(std::bit_cast<char const*>(buffer.data()), buffer.size());
+    consumer.consume();
+    REQUIRE_EQ(str, data);
+  };
+
+  for (std::size_t i = 0; i < 1000; ++i) {
+    for (std::size_t j = 0; j < 100; ++j) {
+      send();
+    }
+    for (std::size_t j = 0; j < 100; ++j) {
+      recv();
+    }
+  }
+}

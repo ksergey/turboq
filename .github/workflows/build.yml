@@ -1,0 +1,193 @@
+name: Build
+
+on: [push]
+
+env:
+  CMAKE_VERSION: 3.29.2
+  NINJA_VERSION: 1.9.0
+
+jobs:
+  build:
+    name: ${{matrix.config.name}}
+    runs-on: ${{matrix.config.os}}
+    strategy:
+      fail-fast: false
+      matrix:
+        config:
+          - {
+              name: "gcc-12 debug",
+              os: ubuntu-latest,
+              build_type: Debug,
+              cc: "gcc-12", cxx: "g++-12"
+            }
+          - {
+              name: "gcc-12 release",
+              os: ubuntu-latest,
+              build_type: Release,
+              cc: "gcc-12", cxx: "g++-12"
+            }
+          - {
+              name: "gcc-13 debug",
+              os: ubuntu-latest,
+              build_type: Debug,
+              cc: "gcc-13", cxx: "g++-13"
+            }
+          - {
+              name: "gcc-13 release",
+              os: ubuntu-latest,
+              build_type: Release,
+              cc: "gcc-13", cxx: "g++-13"
+            }
+          - {
+              name: "clang-16 debug",
+              os: ubuntu-latest,
+              build_type: Debug,
+              cc: "clang-16", cxx: "clang++-16"
+            }
+          - {
+              name: "clang-16 release",
+              os: ubuntu-latest,
+              build_type: Release,
+              cc: "clang-16", cxx: "clang++-16"
+            }
+          - {
+              name: "clang-17 debug",
+              os: ubuntu-latest,
+              build_type: Debug,
+              cc: "clang-17", cxx: "clang++-17"
+            }
+          - {
+              name: "clang-17 release",
+              os: ubuntu-latest,
+              build_type: Release,
+              cc: "clang-17", cxx: "clang++-17"
+            }
+
+    steps:
+      - uses: actions/checkout@v1
+
+      - name: Download Ninja and CMake
+        id: cmake_and_ninja
+        shell: cmake -P {0}
+        run: |
+          set(cmake_version $ENV{CMAKE_VERSION})
+          set(ninja_version $ENV{NINJA_VERSION})
+
+          message(STATUS "Using host CMake version: ${CMAKE_VERSION}")
+
+          set(ninja_suffix "linux.zip")
+          set(cmake_suffix "linux-x86_64.tar.gz")
+          set(cmake_dir "cmake-${cmake_version}-linux-x86_64/bin")
+
+          set(ninja_url "https://github.com/ninja-build/ninja/releases/download/v${ninja_version}/ninja-${ninja_suffix}")
+          file(DOWNLOAD "${ninja_url}" ./ninja.zip SHOW_PROGRESS)
+          execute_process(COMMAND ${CMAKE_COMMAND} -E tar xvf ./ninja.zip)
+
+          set(cmake_url "https://github.com/Kitware/CMake/releases/download/v${cmake_version}/cmake-${cmake_version}-${cmake_suffix}")
+          file(DOWNLOAD "${cmake_url}" ./cmake.zip SHOW_PROGRESS)
+          execute_process(COMMAND ${CMAKE_COMMAND} -E tar xvf ./cmake.zip)
+
+          # Save the path for other steps
+          file(TO_CMAKE_PATH "$ENV{GITHUB_WORKSPACE}/${cmake_dir}" cmake_dir)
+          file(APPEND $ENV{GITHUB_OUTPUT} "cmake_dir=${cmake_dir}")
+
+          execute_process(
+            COMMAND chmod +x ninja
+            COMMAND chmod +x ${cmake_dir}/cmake
+          )
+
+      - name: Install gcc-12
+        id: install_gcc_12
+        if: startsWith(matrix.config.name, 'gcc-12')
+        shell: bash
+        working-directory: ${{ env.HOME }}
+        run: |
+          sudo add-apt-repository ppa:ubuntu-toolchain-r/ppa -y
+          sudo apt update
+          sudo apt install -y g++-12 gcc-12
+
+      - name: Install gcc-13
+        id: install_gcc_13
+        if: startsWith(matrix.config.name, 'gcc-13')
+        shell: bash
+        working-directory: ${{ env.HOME }}
+        run: |
+          sudo apt update
+          sudo apt install -y g++-13 gcc-13
+
+      - name: Install clang-16
+        id: install_clang_16
+        if: startsWith(matrix.config.name, 'clang-16')
+        shell: bash
+        working-directory: ${{ env.HOME }}
+        run: |
+          curl -O -L https://apt.llvm.org/llvm.sh
+          chmod +x llvm.sh
+          sudo ./llvm.sh 16
+
+      - name: Install clang-17
+        id: install_clang_17
+        if: startsWith(matrix.config.name, 'clang-17')
+        shell: bash
+        working-directory: ${{ env.HOME }}
+        run: |
+          curl -O -L https://apt.llvm.org/llvm.sh
+          chmod +x llvm.sh
+          sudo ./llvm.sh 17
+
+      - name: Configure
+        shell: cmake -P {0}
+        run: |
+          set(ENV{CC} ${{ matrix.config.cc }})
+          set(ENV{CXX} ${{ matrix.config.cxx }})
+
+          set(ENV{PATH} "$ENV{GITHUB_WORKSPACE}:$ENV{PATH}")
+
+          execute_process(
+            COMMAND ${{ steps.cmake_and_ninja.outputs.cmake_dir }}/cmake
+              -S .
+              -B build
+              -G Ninja
+              -DCMAKE_BUILD_TYPE=${{ matrix.config.build_type }}
+              -DCMAKE_MAKE_PROGRAM=ninja
+              -DCMAKE_VERBOSE_MAKEFILE=ON
+              ${{ matrix.config.cmake_args }}
+            RESULT_VARIABLE result
+          )
+          if (NOT result EQUAL 0)
+            message(FATAL_ERROR "Bad exit status")
+          endif()
+
+      - name: Build
+        shell: cmake -P {0}
+        continue-on-error: ${{ matrix.config.experimental || false }}
+        run: |
+          set(ENV{NINJA_STATUS} "[%f/%t %o/sec] ")
+
+          set(ENV{PATH} "$ENV{GITHUB_WORKSPACE}:$ENV{PATH}")
+
+          execute_process(
+            COMMAND ${{ steps.cmake_and_ninja.outputs.cmake_dir }}/cmake --build build
+            RESULT_VARIABLE result
+          )
+          if (NOT result EQUAL 0)
+            message(FATAL_ERROR "Bad exit status")
+          endif()
+
+      - name: Run tests
+        shell: cmake -P {0}
+        continue-on-error: ${{ matrix.config.experimental || false }}
+        run: |
+          include(ProcessorCount)
+          ProcessorCount(N)
+
+          set(ENV{CTEST_OUTPUT_ON_FAILURE} "ON")
+
+          execute_process(
+            COMMAND ${{ steps.cmake_and_ninja.outputs.cmake_dir }}/ctest --verbose -j ${N}
+            WORKING_DIRECTORY build
+            RESULT_VARIABLE result
+          )
+          if (NOT result EQUAL 0)
+            message(FATAL_ERROR "Running tests failed!")
+          endif()
