@@ -5,6 +5,8 @@ target_compile_features(${TargetName}
   PUBLIC cxx_std_20)
 target_compile_options(${TargetName}
   PUBLIC -Wall -Wextra -Wattributes -Wpedantic -Wstrict-aliasing -Wcast-align -g)
+target_compile_options(${TargetName}
+  PRIVATE -fno-rtti)
 target_include_directories(${TargetName}
   PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(${TargetName}
