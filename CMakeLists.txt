@@ -2,6 +2,8 @@ cmake_minimum_required(VERSION 3.24)
 
 project(turboq CXX)
 
+include(cmake/TurboQHelpers.cmake)
+
 if(NOT TARGET fmt::fmt)
   add_subdirectory(deps/fmt)
 endif()
@@ -17,10 +19,6 @@ endif()
 if(NOT TARGET cxxopts::cxxopts)
   add_subdirectory(deps/cxxopts)
 endif()
-
-# My modules
-set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
-include(TurboQHelpers)
 
 enable_testing()
 

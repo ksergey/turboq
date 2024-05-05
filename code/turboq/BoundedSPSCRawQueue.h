@@ -31,9 +31,11 @@ struct BoundedSPSCRawQueueDetail {
     /// Placeholder for queue tag
     char tag[kTag.size()];
     /// Producer position
-    alignas(kHardwareDestructiveInterferenceSize) std::atomic_size_t producerPos;
+    alignas(kHardwareDestructiveInterferenceSize) std::size_t producerPos;
     /// Consumer position
-    alignas(kHardwareDestructiveInterferenceSize) std::atomic_size_t consumerPos;
+    alignas(kHardwareDestructiveInterferenceSize) std::size_t consumerPos;
+
+    static_assert(std::atomic_ref<std::size_t>::is_always_lock_free);
   };
 
   /// Control struct for message
@@ -63,8 +65,8 @@ struct BoundedSPSCRawQueueDetail {
   void init(std::span<std::byte> buffer) noexcept {
     auto header = std::bit_cast<MemoryHeader*>(buffer.data());
     std::copy(kTag.begin(), kTag.end(), header->tag);
-    header->producerPos.store(0, std::memory_order_relaxed);
-    header->consumerPos.store(0, std::memory_order_relaxed);
+    std::atomic_ref(header->producerPos).store(0, std::memory_order_relaxed);
+    std::atomic_ref(header->consumerPos).store(0, std::memory_order_relaxed);
   }
 };
 
@@ -100,9 +102,9 @@ public:
 
     header_ = std::bit_cast<MemoryHeader*>(content.data());
     data_ = content.subspan(kDataOffset);
-    producerPosCache_ = header_->producerPos.load(std::memory_order_acquire);
+    producerPosCache_ = std::atomic_ref(header_->producerPos).load(std::memory_order_acquire);
 
-    auto const consumerPos = header_->consumerPos.load(std::memory_order_acquire);
+    auto const consumerPos = std::atomic_ref(header_->consumerPos).load(std::memory_order_acquire);
     if (consumerPos > producerPosCache_) {
       minFreeSpace_ = consumerPos - producerPosCache_;
     } else {
@@ -133,7 +135,7 @@ public:
       return data_.subspan(lastMessageHeader_->payloadOffset, lastMessageHeader_->payloadSize);
     }
 
-    auto const consumerPosCache = header_->consumerPos.load(std::memory_order_acquire);
+    auto const consumerPosCache = std::atomic_ref(header_->consumerPos).load(std::memory_order_acquire);
     if (consumerPosCache > producerPosCache_) {
       // in case of consumerPosCache == producerPosCache_ then queue is empty
 
@@ -185,7 +187,7 @@ public:
 
   /// Make reserved buffer visible for consumers
   TURBOQ_FORCE_INLINE void commit() noexcept {
-    header_->producerPos.store(producerPosCache_, std::memory_order_release);
+    std::atomic_ref(header_->producerPos).store(producerPosCache_, std::memory_order_release);
   }
 
   /// \overload
@@ -246,8 +248,8 @@ public:
 
     header_ = std::bit_cast<MemoryHeader*>(content.data());
     data_ = content.subspan(kDataOffset);
-    consumerPosCache_ = header_->consumerPos.load(std::memory_order_acquire);
-    producerPosCache_ = header_->producerPos.load(std::memory_order_acquire);
+    consumerPosCache_ = std::atomic_ref(header_->consumerPos).load(std::memory_order_acquire);
+    producerPosCache_ = std::atomic_ref(header_->producerPos).load(std::memory_order_acquire);
   }
 
   /// Return true on initialized
@@ -258,8 +260,8 @@ public:
   /// Get next buffer for reading. Return empty buffer in case of no data.
   [[nodiscard]] TURBOQ_FORCE_INLINE std::span<std::byte const> fetch() noexcept {
     if ((consumerPosCache_ == producerPosCache_ &&
-            (producerPosCache_ = header_->producerPos.load(std::memory_order_acquire)) == consumerPosCache_))
-        [[unlikely]] {
+            (producerPosCache_ = std::atomic_ref(header_->producerPos).load(std::memory_order_acquire)) ==
+                consumerPosCache_)) [[unlikely]] {
       return {};
     }
 
@@ -271,14 +273,14 @@ public:
 
   /// Consume front buffer and make buffer available for producer
   TURBOQ_FORCE_INLINE void consume() noexcept {
-    header_->consumerPos.store(consumerPosCache_, std::memory_order_release);
+    std::atomic_ref(header_->consumerPos).store(consumerPosCache_, std::memory_order_release);
   }
 
   /// Reset queue
   TURBOQ_FORCE_INLINE void reset() noexcept {
-    producerPosCache_ = header_->producerPos.load(std::memory_order_acquire);
+    producerPosCache_ = std::atomic_ref(header_->producerPos).load(std::memory_order_acquire);
     consumerPosCache_ = producerPosCache_;
-    header_->consumerPos.store(consumerPosCache_, std::memory_order_release);
+    std::atomic_ref(header_->consumerPos).store(consumerPosCache_, std::memory_order_release);
   }
 
   /// Swap resources with other object
