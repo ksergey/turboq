@@ -20,10 +20,10 @@ TurboQAddTestsFromSourceList(Sources
   OPTIONS -Wall -Wextra
   LIBS doctest::doctest_with_main ${TargetName})
 
-# TurboQAddBenchmarksFromSourceList(Sources
-#   PREFIX ${TargetName}
-#   OPTIONS -Wall -Wextra
-#   LIBS benchmark::benchmark_main ${TargetName})
+TurboQAddBenchmarksFromSourceList(Sources
+  PREFIX ${TargetName}
+  OPTIONS -Wall -Wextra
+  LIBS fmt::fmt ${TargetName})
 
 TurboQExcludeTestsAndBenchmarksFromSourceList(Sources)
 

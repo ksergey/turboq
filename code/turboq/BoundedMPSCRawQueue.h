@@ -37,9 +37,11 @@ struct BoundedMPSCRawQueueDetail {
     /// Queue length
     std::size_t length;
     /// Consumer position
-    alignas(kHardwareDestructiveInterferenceSize) std::atomic_size_t consumerPos;
+    alignas(kHardwareDestructiveInterferenceSize) std::size_t consumerPos;
     /// Producer position
-    alignas(kHardwareDestructiveInterferenceSize) std::atomic_size_t producerPos;
+    alignas(kHardwareDestructiveInterferenceSize) std::size_t producerPos;
+
+    static_assert(std::atomic_ref<std::size_t>::is_always_lock_free);
   };
 
   /// Control struct for message
@@ -49,7 +51,9 @@ struct BoundedMPSCRawQueueDetail {
 
   /// Control struct for commit state
   struct StateHeader {
-    alignas(kHardwareDestructiveInterferenceSize) std::atomic_bool commited;
+    alignas(kHardwareDestructiveInterferenceSize) bool commited;
+
+    static_assert(std::atomic_ref<bool>::is_always_lock_free);
   };
 
   /// Offset for first message header from memory buffer start.
@@ -113,7 +117,7 @@ public:
     header_ = std::bit_cast<MemoryHeader*>(storage_.data());
     data_ = storage_.data() + kDataOffset;
     commitStates_ = std::bit_cast<StateHeader*>(data_ + header_->maxMessageSize * header_->length);
-    localConsumerPos_ = header_->consumerPos.load(std::memory_order_acquire);
+    localConsumerPos_ = std::atomic_ref(header_->consumerPos).load(std::memory_order_acquire);
   }
 
   /// Return true on initialized
@@ -146,16 +150,17 @@ public:
           fmt::format("buffer exceed max message size ({} > {})", totalSize, header_->maxMessageSize));
     }
 
-    std::size_t currentProducerPos = header_->producerPos.load(std::memory_order_acquire);
+    std::size_t currentProducerPos = std::atomic_ref(header_->producerPos).load(std::memory_order_acquire);
     if (currentProducerPos - localConsumerPos_ >= header_->length) [[unlikely]] {
-      localConsumerPos_ = header_->consumerPos.load(std::memory_order_acquire);
+      localConsumerPos_ = std::atomic_ref(header_->consumerPos).load(std::memory_order_acquire);
       if (currentProducerPos - localConsumerPos_ >= header_->length) [[unlikely]] {
         return {};
       }
     }
 
-    while (!std::atomic_compare_exchange_weak_explicit(&header_->producerPos, &currentProducerPos,
-        currentProducerPos + 1, std::memory_order_release, std::memory_order_relaxed)) [[unlikely]] {
+    while (!std::atomic_ref(header_->producerPos)
+                .compare_exchange_weak(currentProducerPos, currentProducerPos + 1, std::memory_order_release,
+                    std::memory_order_relaxed)) [[unlikely]] {
       if (currentProducerPos - localConsumerPos_ >= header_->length) [[unlikely]] {
         return {};
       }
@@ -170,7 +175,7 @@ public:
 
   /// Make reserved buffer visible for consumers
   TURBOQ_FORCE_INLINE void commit() noexcept {
-    (commitStates_ + localProducerPos_)->commited.store(true, std::memory_order_release);
+    std::atomic_ref((commitStates_ + localProducerPos_)->commited).store(true, std::memory_order_release);
   }
 
   /// \overload
@@ -236,8 +241,8 @@ public:
     header_ = std::bit_cast<MemoryHeader*>(storage_.data());
     data_ = content.data() + kDataOffset;
     commitStates_ = std::bit_cast<StateHeader*>(data_ + header_->maxMessageSize * header_->length);
-    localProducerPos_ = header_->producerPos.load(std::memory_order_acquire);
-    localConsumerPos_ = header_->consumerPos.load(std::memory_order_acquire);
+    localProducerPos_ = std::atomic_ref(header_->producerPos).load(std::memory_order_acquire);
+    localConsumerPos_ = std::atomic_ref(header_->consumerPos).load(std::memory_order_acquire);
   }
 
   /// Return true on initialized
@@ -264,15 +269,15 @@ public:
   /// Get next buffer for reading. Return empty buffer in case of no data.
   [[nodiscard]] TURBOQ_FORCE_INLINE std::span<std::byte const> fetch() noexcept {
     if ((localConsumerPos_ == localProducerPos_ &&
-            (localProducerPos_ = header_->producerPos.load(std::memory_order_acquire)) == localConsumerPos_))
-        [[unlikely]] {
+            (localProducerPos_ = std::atomic_ref(header_->producerPos).load(std::memory_order_acquire)) ==
+                localConsumerPos_)) [[unlikely]] {
       return {};
     }
 
     std::size_t const consumerPos = localConsumerPos_ & (header_->length - 1);
 
     lastCommitState_ = commitStates_ + consumerPos;
-    if (!lastCommitState_->commited.load(std::memory_order_acquire)) [[unlikely]] {
+    if (!std::atomic_ref(lastCommitState_->commited).load(std::memory_order_acquire)) [[unlikely]] {
       return {};
     }
 
@@ -283,8 +288,8 @@ public:
   /// Consume front buffer and make buffer available for producer
   TURBOQ_FORCE_INLINE void consume() noexcept {
     localConsumerPos_++;
-    lastCommitState_->commited.store(false, std::memory_order_release);
-    header_->consumerPos.store(localConsumerPos_, std::memory_order_release);
+    std::atomic_ref(lastCommitState_->commited).store(false, std::memory_order_release);
+    std::atomic_ref(header_->consumerPos).store(localConsumerPos_, std::memory_order_release);
   }
 
   /// Reset queue
@@ -293,10 +298,10 @@ public:
       // Drop message.
       std::size_t const consumerPos = localConsumerPos_ & (header_->length - 1);
       lastCommitState_ = commitStates_ + consumerPos;
-      lastCommitState_->commited.store(false, std::memory_order_release);
+      std::atomic_ref(lastCommitState_->commited).store(false, std::memory_order_release);
       localConsumerPos_++;
     }
-    header_->consumerPos.store(localConsumerPos_, std::memory_order_release);
+    std::atomic_ref(header_->consumerPos).store(localConsumerPos_, std::memory_order_release);
   }
 
   /// Swap resources with other object
