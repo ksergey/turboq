@@ -89,7 +89,7 @@ TURBOQ_FORCE_INLINE void doNotOptimize(T& value) noexcept {
 }
 
 template <typename D, typename P, typename Fn>
-  requires turboq::Producer<P> && std::is_trivially_copyable_v<D>
+  requires turboq::TurboQProducer<P> && std::is_trivially_copyable_v<D>
 void push(P& producer, Fn&& fn) {
   do {
     auto buffer = producer.prepare(sizeof(D));
@@ -103,7 +103,7 @@ void push(P& producer, Fn&& fn) {
 }
 
 template <typename D, typename C, typename Fn>
-  requires turboq::Consumer<C> && std::is_trivially_copyable_v<D>
+  requires turboq::TurboQConsumer<C> && std::is_trivially_copyable_v<D>
 bool pop(C& consumer, Fn&& fn) {
   auto buffer = consumer.fetch();
   if (buffer.size() == 0) {

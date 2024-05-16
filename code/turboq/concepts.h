@@ -11,7 +11,7 @@ namespace turboq {
 
 /// Checks T is Producer type
 template <typename T>
-concept Producer = requires(T obj, std::size_t size) {
+concept TurboQProducer = requires(T obj, std::size_t size) {
   { obj.prepare(size) } -> std::same_as<std::span<std::byte>>;
   { obj.commit() } -> std::same_as<void>;
   { obj.commit(size) } -> std::same_as<void>;
@@ -19,7 +19,7 @@ concept Producer = requires(T obj, std::size_t size) {
 
 /// Checks T is Consumer type
 template <typename T>
-concept Consumer = requires(T obj) {
+concept TurboQConsumer = requires(T obj) {
   { obj.fetch() } -> std::same_as<std::span<std::byte const>>;
   { obj.consume() } -> std::same_as<void>;
   { obj.reset() } -> std::same_as<void>;

@@ -116,8 +116,10 @@ public:
 
     header_ = std::bit_cast<MemoryHeader*>(storage_.data());
     std::size_t offset = kDataOffset;
+
     data_ = std::span<std::byte>(storage_.data() + offset, header_->maxMessageSize * header_->length);
     offset += (header_->maxMessageSize * header_->length);
+
     commitStates_ = std::span<StateHeader>(std::bit_cast<StateHeader*>(storage_.data() + offset), header_->length);
     localConsumerPos_ = std::atomic_ref(header_->consumerPos).load(std::memory_order_acquire);
   }
@@ -241,10 +243,13 @@ public:
     }
 
     header_ = std::bit_cast<MemoryHeader*>(storage_.data());
+
     std::size_t offset = kDataOffset;
     data_ = std::span<std::byte>(content.data() + offset, header_->maxMessageSize * header_->length);
+
     offset += header_->maxMessageSize * header_->length;
     commitStates_ = std::span<StateHeader>(std::bit_cast<StateHeader*>(storage_.data() + offset), header_->length);
+
     localProducerPos_ = std::atomic_ref(header_->producerPos).load(std::memory_order_acquire);
     localConsumerPos_ = std::atomic_ref(header_->consumerPos).load(std::memory_order_acquire);
   }

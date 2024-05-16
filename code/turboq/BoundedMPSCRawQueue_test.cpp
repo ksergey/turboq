@@ -18,10 +18,10 @@ TEST_CASE("BoundedMPSCRawQueue: multipleMessages0") {
   turboq::BoundedMPSCRawQueue queue("test", options, turboq::AnonymousMemorySource());
 
   auto producer = queue.createProducer();
-  static_assert(turboq::Producer<decltype(producer)>);
+  static_assert(turboq::TurboQProducer<decltype(producer)>);
 
   auto consumer = queue.createConsumer();
-  static_assert(turboq::Consumer<decltype(consumer)>);
+  static_assert(turboq::TurboQConsumer<decltype(consumer)>);
 
   REQUIRE(producer);
   REQUIRE(consumer);
