@@ -89,8 +89,8 @@ class BoundedMPSCRawQueueProducer : BoundedMPSCRawQueueDetail {
 private:
   MappedRegion storage_;
   MemoryHeader* header_ = nullptr;
-  std::byte* data_ = nullptr;
-  StateHeader* commitStates_ = nullptr;
+  std::span<std::byte> data_;
+  std::span<StateHeader> commitStates_;
   std::size_t localProducerPos_ = 0;
   std::size_t localConsumerPos_ = 0;
 
@@ -115,8 +115,10 @@ public:
     }
 
     header_ = std::bit_cast<MemoryHeader*>(storage_.data());
-    data_ = storage_.data() + kDataOffset;
-    commitStates_ = std::bit_cast<StateHeader*>(data_ + header_->maxMessageSize * header_->length);
+    std::size_t offset = kDataOffset;
+    data_ = std::span<std::byte>(storage_.data() + offset, header_->maxMessageSize * header_->length);
+    offset += (header_->maxMessageSize * header_->length);
+    commitStates_ = std::span<StateHeader>(std::bit_cast<StateHeader*>(storage_.data() + offset), header_->length);
     localConsumerPos_ = std::atomic_ref(header_->consumerPos).load(std::memory_order_acquire);
   }
 
@@ -167,7 +169,7 @@ public:
     }
 
     localProducerPos_ = currentProducerPos & (header_->length - 1);
-    std::byte* content = data_ + localProducerPos_ * header_->maxMessageSize;
+    std::byte* content = data_.data() + localProducerPos_ * header_->maxMessageSize;
     std::bit_cast<MessageHeader*>(content)->payloadSize = size;
 
     return {content + sizeof(MessageHeader), size};
@@ -175,12 +177,12 @@ public:
 
   /// Make reserved buffer visible for consumers
   TURBOQ_FORCE_INLINE void commit() noexcept {
-    std::atomic_ref((commitStates_ + localProducerPos_)->commited).store(true, std::memory_order_release);
+    std::atomic_ref(commitStates_[localProducerPos_].commited).store(true, std::memory_order_release);
   }
 
   /// \overload
   TURBOQ_FORCE_INLINE void commit(std::size_t size) noexcept {
-    auto header = std::bit_cast<MessageHeader*>(data_ + localProducerPos_ * header_->maxMessageSize);
+    auto header = std::bit_cast<MessageHeader*>(data_.data() + localProducerPos_ * header_->maxMessageSize);
     if (size <= header->payloadSize) [[likely]] {
       header->payloadSize = size;
     } else {
@@ -211,8 +213,8 @@ class BoundedMPSCRawQueueConsumer : BoundedMPSCRawQueueDetail {
 private:
   MappedRegion storage_;
   MemoryHeader* header_ = nullptr;
-  std::byte* data_ = nullptr;
-  StateHeader* commitStates_ = nullptr;
+  std::span<std::byte> data_;
+  std::span<StateHeader> commitStates_;
   std::size_t localProducerPos_ = 0;
   std::size_t localConsumerPos_ = 0;
   MessageHeader* lastMessageHeader_ = nullptr;
@@ -239,8 +241,10 @@ public:
     }
 
     header_ = std::bit_cast<MemoryHeader*>(storage_.data());
-    data_ = content.data() + kDataOffset;
-    commitStates_ = std::bit_cast<StateHeader*>(data_ + header_->maxMessageSize * header_->length);
+    std::size_t offset = kDataOffset;
+    data_ = std::span<std::byte>(content.data() + offset, header_->maxMessageSize * header_->length);
+    offset += header_->maxMessageSize * header_->length;
+    commitStates_ = std::span<StateHeader>(std::bit_cast<StateHeader*>(storage_.data() + offset), header_->length);
     localProducerPos_ = std::atomic_ref(header_->producerPos).load(std::memory_order_acquire);
     localConsumerPos_ = std::atomic_ref(header_->consumerPos).load(std::memory_order_acquire);
   }
@@ -276,12 +280,12 @@ public:
 
     std::size_t const consumerPos = localConsumerPos_ & (header_->length - 1);
 
-    lastCommitState_ = commitStates_ + consumerPos;
+    lastCommitState_ = &commitStates_[consumerPos];
     if (!std::atomic_ref(lastCommitState_->commited).load(std::memory_order_acquire)) [[unlikely]] {
       return {};
     }
 
-    lastMessageHeader_ = std::bit_cast<MessageHeader*>(data_ + consumerPos * header_->maxMessageSize);
+    lastMessageHeader_ = std::bit_cast<MessageHeader*>(data_.data() + consumerPos * header_->maxMessageSize);
     return {std::bit_cast<std::byte*>(lastMessageHeader_ + 1), lastMessageHeader_->payloadSize};
   }
 
@@ -297,7 +301,7 @@ public:
     while (localConsumerPos_ != localProducerPos_) {
       // Drop message.
       std::size_t const consumerPos = localConsumerPos_ & (header_->length - 1);
-      lastCommitState_ = commitStates_ + consumerPos;
+      lastCommitState_ = &commitStates_[consumerPos];
       std::atomic_ref(lastCommitState_->commited).store(false, std::memory_order_release);
       localConsumerPos_++;
     }
