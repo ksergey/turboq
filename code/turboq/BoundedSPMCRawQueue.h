@@ -19,19 +19,24 @@
 #include <turboq/platform.h>
 
 namespace turboq {
-namespace internal {
+namespace detail {
 
-/// Circular FIFO byte queue details
+/// SPMC queue detail
+template <typename Traits>
 struct BoundedSPMCRawQueueDetail {
   /// Queue tag
-  static constexpr auto kTag = std::string_view("turboq/SPMC");
+  static constexpr std::string_view kTag = Traits::kTag;
+  /// Segment size
+  static constexpr std::size_t kSegmentSize = Traits::kSegmentSize;
+  /// Alignment
+  static constexpr std::size_t kAlign = Traits::kAlign;
 
   /// Control struct for queue buffer
   struct MemoryHeader {
     /// Placeholder for queue tag
     char tag[kTag.size()];
     /// Producer position
-    alignas(kHardwareDestructiveInterferenceSize) std::size_t producerPos;
+    alignas(kAlign) std::size_t producerPos;
 
     static_assert(std::atomic_ref<std::size_t>::is_always_lock_free);
   };
@@ -43,13 +48,21 @@ struct BoundedSPMCRawQueueDetail {
     std::size_t payloadSize;
   };
 
-  /// Offset for the first message header from memory buffer start.
-  static constexpr std::size_t kDataOffset = detail::ceil(sizeof(MemoryHeader), kHardwareDestructiveInterferenceSize);
+  /// Align message buffer size
+  static constexpr std::size_t alignBufferSize(std::size_t value) noexcept {
+    return detail::align_up(value, kSegmentSize);
+  }
+
+  /// Offset for the first message header from memory buffer start
+  static constexpr std::size_t kDataStartPos = alignBufferSize(sizeof(MemoryHeader));
+
+  /// Min buffer size
+  static constexpr std::size_t kMinBufferSize = kDataStartPos + 2 * kSegmentSize;
 
   /// Check buffer points to valid SPMC queue region
   /// Return true on success and false otherwise.
   [[nodiscard]] static bool check(std::span<std::byte const> buffer) noexcept {
-    if (buffer.size() < kDataOffset + 1) {
+    if (buffer.size() < kMinBufferSize) {
       return false;
     }
     auto const header = std::bit_cast<MemoryHeader const*>(buffer.data());
@@ -60,15 +73,20 @@ struct BoundedSPMCRawQueueDetail {
   }
 
   /// Init queue memory header
-  void init(std::span<std::byte> buffer) noexcept {
+  static void init(std::span<std::byte> buffer) noexcept {
     auto header = std::bit_cast<MemoryHeader*>(buffer.data());
     std::copy(kTag.begin(), kTag.end(), header->tag);
   }
 };
 
-/// Implements a circular FIFO byte queue producer
-class BoundedSPMCRawQueueProducer : BoundedSPMCRawQueueDetail {
+/// Implements a SPMC queue producer
+template <typename Traits>
+class BoundedSPMCRawQueueProducer {
 private:
+  using QueueDetail = BoundedSPMCRawQueueDetail<Traits>;
+  using MemoryHeader = typename QueueDetail::MemoryHeader;
+  using MessageHeader = typename QueueDetail::MessageHeader;
+
   MappedRegion storage_;
   std::span<std::byte> data_;
   MemoryHeader* header_ = nullptr;
@@ -91,12 +109,12 @@ public:
   BoundedSPMCRawQueueProducer(MappedRegion&& storage) : storage_(std::move(storage)) {
     auto content = storage_.content();
 
-    if (!check(content)) {
+    if (!QueueDetail::check(content)) {
       throw std::runtime_error("invalid queue");
     }
 
     header_ = std::bit_cast<MemoryHeader*>(storage_.data());
-    data_ = content.subspan(kDataOffset);
+    data_ = content.subspan(QueueDetail::kDataStartPos);
     producerPosCache_ = std::atomic_ref(header_->producerPos).load(std::memory_order_acquire);
   }
 
@@ -112,13 +130,14 @@ public:
 
   /// Reserve contiguous space for writing without making it visible to the consumers
   [[nodiscard]] TURBOQ_FORCE_INLINE std::span<std::byte> prepare(std::size_t size) noexcept {
-    std::size_t const alignedSize = detail::ceil(size + sizeof(MessageHeader), kHardwareDestructiveInterferenceSize);
+    std::size_t const alignedSize = QueueDetail::alignBufferSize(size + sizeof(MessageHeader));
 
     lastMessageHeader_ = std::bit_cast<MessageHeader*>(data_.data() + producerPosCache_);
     lastMessageHeader_->size = alignedSize - sizeof(MessageHeader);
     lastMessageHeader_->payloadSize = size;
 
     if (producerPosCache_ + alignedSize + sizeof(MessageHeader) > data_.size()) [[unlikely]] {
+      lastMessageHeader_->size = QueueDetail::alignBufferSize(size);
       producerPosCache_ = 0;
     } else {
       producerPosCache_ += sizeof(MessageHeader);
@@ -162,14 +181,20 @@ public:
   }
 };
 
-/// Implements a circular FIFO byte queue consumer
-class BoundedSPMCRawQueueConsumer : BoundedSPMCRawQueueDetail {
+/// Implements a SPMC queue consumer
+template <typename Traits>
+class BoundedSPMCRawQueueConsumer {
 private:
+  using QueueDetail = BoundedSPMCRawQueueDetail<Traits>;
+  using MemoryHeader = typename QueueDetail::MemoryHeader;
+  using MessageHeader = typename QueueDetail::MessageHeader;
+
   MappedRegion storage_;
   std::span<std::byte> data_;
   MemoryHeader* header_ = nullptr;
   std::size_t consumerPosCache_ = 0;
   std::size_t producerPosCache_ = 0;
+  MessageHeader* lastMessageHeader_ = nullptr;
 
 public:
   BoundedSPMCRawQueueConsumer() = default;
@@ -187,12 +212,12 @@ public:
   BoundedSPMCRawQueueConsumer(MappedRegion&& storage) : storage_(std::move(storage)) {
     auto content = storage_.content();
 
-    if (!check(content)) {
+    if (!QueueDetail::check(content)) {
       throw std::runtime_error("invalid queue");
     }
 
     header_ = std::bit_cast<MemoryHeader*>(content.data());
-    data_ = content.subspan(kDataOffset);
+    data_ = content.subspan(QueueDetail::kDataStartPos);
     consumerPosCache_ = std::atomic_ref(header_->producerPos).load(std::memory_order_relaxed);
     producerPosCache_ = consumerPosCache_;
   }
@@ -215,14 +240,15 @@ public:
       return {};
     }
 
-    MessageHeader const* header = std::bit_cast<MessageHeader*>(data_.data() + consumerPosCache_);
-    consumerPosCache_ = header->payloadOffset + header->size;
-
-    return {data_.data() + header->payloadOffset, header->payloadSize};
+    lastMessageHeader_ = std::bit_cast<MessageHeader*>(data_.data() + consumerPosCache_);
+    return data_.subspan(lastMessageHeader_->payloadOffset, lastMessageHeader_->payloadSize);
   }
 
-  /// Do nothing. Just for interface.
-  TURBOQ_FORCE_INLINE void consume() noexcept {}
+  /// Consume buffer and make buffer space available for producer
+  /// pre: fetch() -> non empty buffer
+  TURBOQ_FORCE_INLINE void consume() noexcept {
+    consumerPosCache_ = lastMessageHeader_->payloadOffset + lastMessageHeader_->size;
+  }
 
   /// Reset queue
   TURBOQ_FORCE_INLINE void reset() noexcept {
@@ -238,6 +264,7 @@ public:
     swap(header_, that.header_);
     swap(consumerPosCache_, that.consumerPosCache_);
     swap(producerPosCache_, that.producerPosCache_);
+    swap(lastMessageHeader_, that.lastMessageHeader_);
   }
 
   /// \see BoundedSPMCRawQueueConsumer::swap
@@ -246,35 +273,60 @@ public:
   }
 };
 
-} // namespace internal
+} // namespace detail
 
-class BoundedSPMCRawQueue : internal::BoundedSPMCRawQueueDetail {
+/// Queue layout:
+/// s               e   s                      e  s                    e
+/// +---------------+---+--------+-------------+--+--------+-----------+-----+--------
+/// | MemoryHeader  |xxx| Header | Payload     |xx| Header |  Payload  |xxxxx|uuuuuuuu ...
+/// +---------------+---+--------+-------------+--+--------+-----------+-----+--------
+/// s   - start
+/// e   - end
+/// xxx - padding bytes
+/// uuu - unused bytes
+template <typename Traits>
+class BoundedSPMCRawQueueImpl;
+
+struct BoundedSPMCRawQueueDefaultTraits {
+  static constexpr std::string_view kTag = "turboq/SPMC";
+  static constexpr std::size_t kSegmentSize = kHardwareDestructiveInterferenceSize;
+  static constexpr std::size_t kAlign = kHardwareDestructiveInterferenceSize;
+};
+
+using BoundedSPMCRawQueue = BoundedSPMCRawQueueImpl<BoundedSPMCRawQueueDefaultTraits>;
+
+template <typename Traits>
+class BoundedSPMCRawQueueImpl {
 private:
+  using QueueDetail = detail::BoundedSPMCRawQueueDetail<Traits>;
+  using MemoryHeader = typename QueueDetail::MemoryHeader;
+  using MessageHeader = typename QueueDetail::MessageHeader;
+
   File file_;
 
 public:
-  using Producer = internal::BoundedSPMCRawQueueProducer;
-  using Consumer = internal::BoundedSPMCRawQueueConsumer;
+  using Producer = detail::BoundedSPMCRawQueueProducer<Traits>;
+  using Consumer = detail::BoundedSPMCRawQueueConsumer<Traits>;
 
   struct CreationOptions {
-    std::size_t sizeHint;
+    std::size_t capacityHint;
   };
 
-  BoundedSPMCRawQueue(BoundedSPMCRawQueue const&) = delete;
-  BoundedSPMCRawQueue& operator=(BoundedSPMCRawQueue const&) = delete;
-  BoundedSPMCRawQueue() = default;
+  BoundedSPMCRawQueueImpl(BoundedSPMCRawQueueImpl const&) = delete;
+  BoundedSPMCRawQueueImpl& operator=(BoundedSPMCRawQueueImpl const&) = delete;
+  BoundedSPMCRawQueueImpl() = default;
 
-  BoundedSPMCRawQueue(BoundedSPMCRawQueue&& that) noexcept {
+  BoundedSPMCRawQueueImpl(BoundedSPMCRawQueueImpl&& that) noexcept {
     swap(that);
   }
 
-  BoundedSPMCRawQueue& operator=(BoundedSPMCRawQueue&& that) noexcept {
+  BoundedSPMCRawQueueImpl& operator=(BoundedSPMCRawQueueImpl&& that) noexcept {
     swap(that);
     return *this;
   }
 
   /// Open only queue. Throws on error.
-  BoundedSPMCRawQueue(std::string_view name, MemorySource const& memorySource = DefaultMemorySource()) {
+  BoundedSPMCRawQueueImpl(std::string_view name, MemorySource const& memorySource = DefaultMemorySource()) {
     auto result = memorySource.open(name, MemorySource::OpenOnly);
     if (!result) {
       throw std::runtime_error("failed to open memory source");
@@ -283,17 +335,14 @@ public:
     std::size_t pageSize;
     std::tie(file_, pageSize) = std::move(result).assume_value();
 
-    if (auto storage = detail::mapFile(file_); !check(storage.content())) {
+    if (auto storage = detail::mapFile(file_); !QueueDetail::check(storage.content())) {
       throw std::runtime_error("failed to open queue (invalid)");
     }
   }
 
   /// Open or create queue. Throws on error.
-  BoundedSPMCRawQueue(
+  BoundedSPMCRawQueueImpl(
       std::string_view name, CreationOptions const& options, MemorySource const& memorySource = DefaultMemorySource()) {
-    if (options.sizeHint < kDataOffset) {
-      throw std::runtime_error("invalid argument (size)");
-    }
     auto result = memorySource.open(name, MemorySource::OpenOrCreate);
     if (!result) {
       throw std::runtime_error("failed to open memory source");
@@ -303,19 +352,19 @@ public:
     std::tie(file_, pageSize) = std::move(result).assume_value();
 
     // round-up requested size to page size
-    std::size_t const size = detail::ceil(options.sizeHint, pageSize);
+    std::size_t const capacity = detail::align_up(options.capacityHint, pageSize);
 
     // init queue or check queue's options is the same as requested
     if (auto const fileSize = file_.getFileSize(); fileSize != 0) {
-      if (fileSize != size) {
+      if (fileSize != capacity) {
         throw std::runtime_error("size mismatch");
       }
-      if (auto storage = detail::mapFile(file_); !check(storage.content())) {
+      if (auto storage = detail::mapFile(file_); !QueueDetail::check(storage.content())) {
         throw std::runtime_error("failed to open queue (invalid)");
       }
     } else {
-      file_.truncate(size);
-      init(detail::mapFile(file_, size).content());
+      file_.truncate(capacity);
+      QueueDetail::init(detail::mapFile(file_, capacity).content());
     }
   }
 
@@ -344,13 +393,13 @@ public:
   }
 
   /// Swap resources with other queue.
-  void swap(BoundedSPMCRawQueue& that) noexcept {
+  void swap(BoundedSPMCRawQueueImpl& that) noexcept {
     using std::swap;
     swap(file_, that.file_);
   }
 
-  /// \see BoundedSPMCRawQueue::swap
-  friend void swap(BoundedSPMCRawQueue& a, BoundedSPMCRawQueue& b) noexcept {
+  /// \see BoundedSPMCRawQueueImpl::swap
+  friend void swap(BoundedSPMCRawQueueImpl& a, BoundedSPMCRawQueueImpl& b) noexcept {
     a.swap(b);
   }
 };

@@ -21,12 +21,17 @@
 #include <turboq/platform.h>
 
 namespace turboq {
-namespace internal {
+namespace detail {
 
-/// Circular FIFO byte queue details
+/// MPSC queue detail
+template <typename Traits>
 struct BoundedMPSCRawQueueDetail {
   /// Queue tag
-  static constexpr auto kTag = std::string_view("turboq/MPSC");
+  static constexpr std::string_view kTag = Traits::kTag;
+  /// Segment size
+  static constexpr std::size_t kSegmentSize = Traits::kSegmentSize;
+  /// Alignment
+  static constexpr std::size_t kAlign = Traits::kAlign;
 
   /// Control struct for queue buffer
   struct MemoryHeader {
@@ -37,9 +42,9 @@ struct BoundedMPSCRawQueueDetail {
     /// Queue length
     std::size_t length;
     /// Consumer position
-    alignas(kHardwareDestructiveInterferenceSize) std::size_t consumerPos;
+    alignas(kAlign) std::size_t consumerPos;
     /// Producer position
-    alignas(kHardwareDestructiveInterferenceSize) std::size_t producerPos;
+    alignas(kAlign) std::size_t producerPos;
 
     static_assert(std::atomic_ref<std::size_t>::is_always_lock_free);
   };
@@ -51,20 +56,22 @@ struct BoundedMPSCRawQueueDetail {
 
   /// Control struct for commit state
   struct StateHeader {
-    alignas(kHardwareDestructiveInterferenceSize) bool commited;
+    alignas(kAlign) bool commited;
 
     static_assert(std::atomic_ref<bool>::is_always_lock_free);
   };
 
-  /// Offset for first message header from memory buffer start.
-  static constexpr std::size_t kDataOffset = detail::ceil(sizeof(MemoryHeader), kHardwareDestructiveInterferenceSize);
+  /// Align message buffer size
+  static constexpr std::size_t alignBufferSize(std::size_t value) noexcept {
+    return detail::align_up(value, kSegmentSize);
+  }
+
+  /// Offset for the first message header from memory buffer start
+  static constexpr std::size_t kDataStartPos = alignBufferSize(sizeof(MemoryHeader));
 
   /// Check buffer points to valid SPMC queue region
   /// Return true on success and false otherwise.
   [[nodiscard]] static bool check(std::span<std::byte const> buffer) noexcept {
-    if (buffer.size() < kDataOffset + 1) {
-      return false;
-    }
     auto const header = std::bit_cast<MemoryHeader const*>(buffer.data());
     if (header->maxMessageSize == 0 || header->length == 0) {
       return false;
@@ -76,7 +83,7 @@ struct BoundedMPSCRawQueueDetail {
   }
 
   /// Init queue memory header
-  void init(std::span<std::byte> buffer, std::size_t maxMessageSize, std::size_t length) noexcept {
+  static void init(std::span<std::byte> buffer, std::size_t maxMessageSize, std::size_t length) noexcept {
     auto header = std::bit_cast<MemoryHeader*>(buffer.data());
     std::copy(kTag.begin(), kTag.end(), header->tag);
     header->maxMessageSize = maxMessageSize;
@@ -84,15 +91,21 @@ struct BoundedMPSCRawQueueDetail {
   }
 };
 
-/// Implements a circular FIFO byte queue producer
-class BoundedMPSCRawQueueProducer : BoundedMPSCRawQueueDetail {
+/// Implements a MPSC queue producer
+template <typename Traits>
+class BoundedMPSCRawQueueProducer {
 private:
+  using QueueDetail = BoundedMPSCRawQueueDetail<Traits>;
+  using MemoryHeader = typename QueueDetail::MemoryHeader;
+  using MessageHeader = typename QueueDetail::MessageHeader;
+  using StateHeader = typename QueueDetail::StateHeader;
+
   MappedRegion storage_;
   MemoryHeader* header_ = nullptr;
   std::span<std::byte> data_;
   std::span<StateHeader> commitStates_;
-  std::size_t localProducerPos_ = 0;
-  std::size_t localConsumerPos_ = 0;
+  std::size_t producerPosCache_ = 0;
+  std::size_t consumerPosCache_ = 0;
 
 public:
   BoundedMPSCRawQueueProducer() = default;
@@ -110,18 +123,18 @@ public:
   BoundedMPSCRawQueueProducer(MappedRegion&& storage) : storage_(std::move(storage)) {
     auto content = storage_.content();
 
-    if (!check(content)) {
+    if (!QueueDetail::check(content)) {
       throw std::runtime_error("invalid queue");
     }
 
     header_ = std::bit_cast<MemoryHeader*>(storage_.data());
-    std::size_t offset = kDataOffset;
+    std::size_t offset = QueueDetail::kDataStartPos;
 
     data_ = std::span<std::byte>(storage_.data() + offset, header_->maxMessageSize * header_->length);
     offset += (header_->maxMessageSize * header_->length);
 
     commitStates_ = std::span<StateHeader>(std::bit_cast<StateHeader*>(storage_.data() + offset), header_->length);
-    localConsumerPos_ = std::atomic_ref(header_->consumerPos).load(std::memory_order_acquire);
+    consumerPosCache_ = std::atomic_ref(header_->consumerPos).load(std::memory_order_acquire);
   }
 
   /// Return true on initialized
@@ -155,9 +168,9 @@ public:
     }
 
     std::size_t currentProducerPos = std::atomic_ref(header_->producerPos).load(std::memory_order_acquire);
-    if (currentProducerPos - localConsumerPos_ >= header_->length) [[unlikely]] {
-      localConsumerPos_ = std::atomic_ref(header_->consumerPos).load(std::memory_order_acquire);
-      if (currentProducerPos - localConsumerPos_ >= header_->length) [[unlikely]] {
+    if (currentProducerPos - consumerPosCache_ >= header_->length) [[unlikely]] {
+      consumerPosCache_ = std::atomic_ref(header_->consumerPos).load(std::memory_order_acquire);
+      if (currentProducerPos - consumerPosCache_ >= header_->length) [[unlikely]] {
         return {};
       }
     }
@@ -165,13 +178,13 @@ public:
     while (!std::atomic_ref(header_->producerPos)
                 .compare_exchange_weak(currentProducerPos, currentProducerPos + 1, std::memory_order_release,
                     std::memory_order_relaxed)) [[unlikely]] {
-      if (currentProducerPos - localConsumerPos_ >= header_->length) [[unlikely]] {
+      if (currentProducerPos - consumerPosCache_ >= header_->length) [[unlikely]] {
         return {};
       }
     }
 
-    localProducerPos_ = currentProducerPos & (header_->length - 1);
-    std::byte* content = data_.data() + localProducerPos_ * header_->maxMessageSize;
+    producerPosCache_ = currentProducerPos & (header_->length - 1);
+    std::byte* content = data_.data() + producerPosCache_ * header_->maxMessageSize;
     std::bit_cast<MessageHeader*>(content)->payloadSize = size;
 
     return {content + sizeof(MessageHeader), size};
@@ -179,12 +192,12 @@ public:
 
   /// Make reserved buffer visible for consumers
   TURBOQ_FORCE_INLINE void commit() noexcept {
-    std::atomic_ref(commitStates_[localProducerPos_].commited).store(true, std::memory_order_release);
+    std::atomic_ref(commitStates_[producerPosCache_].commited).store(true, std::memory_order_release);
   }
 
   /// \overload
   TURBOQ_FORCE_INLINE void commit(std::size_t size) noexcept {
-    auto header = std::bit_cast<MessageHeader*>(data_.data() + localProducerPos_ * header_->maxMessageSize);
+    auto header = std::bit_cast<MessageHeader*>(data_.data() + producerPosCache_ * header_->maxMessageSize);
     if (size <= header->payloadSize) [[likely]] {
       header->payloadSize = size;
     } else {
@@ -200,8 +213,8 @@ public:
     swap(header_, that.header_);
     swap(data_, that.data_);
     swap(commitStates_, that.commitStates_);
-    swap(localProducerPos_, that.localProducerPos_);
-    swap(localConsumerPos_, that.localConsumerPos_);
+    swap(producerPosCache_, that.producerPosCache_);
+    swap(consumerPosCache_, that.consumerPosCache_);
   }
 
   /// \see BoundedMPSCRawQueueProducer::swap
@@ -210,15 +223,21 @@ public:
   }
 };
 
-/// Implements a circular FIFO byte queue consumer
-class BoundedMPSCRawQueueConsumer : BoundedMPSCRawQueueDetail {
+/// Implements a MPSC queue consumer
+template <typename Traits>
+class BoundedMPSCRawQueueConsumer {
 private:
+  using QueueDetail = BoundedMPSCRawQueueDetail<Traits>;
+  using MemoryHeader = typename QueueDetail::MemoryHeader;
+  using MessageHeader = typename QueueDetail::MessageHeader;
+  using StateHeader = typename QueueDetail::StateHeader;
+
   MappedRegion storage_;
   MemoryHeader* header_ = nullptr;
   std::span<std::byte> data_;
   std::span<StateHeader> commitStates_;
-  std::size_t localProducerPos_ = 0;
-  std::size_t localConsumerPos_ = 0;
+  std::size_t producerPosCache_ = 0;
+  std::size_t consumerPosCache_ = 0;
   MessageHeader* lastMessageHeader_ = nullptr;
   StateHeader* lastCommitState_ = nullptr;
 
@@ -238,20 +257,20 @@ public:
   BoundedMPSCRawQueueConsumer(MappedRegion&& storage) : storage_(std::move(storage)) {
     auto content = storage_.content();
 
-    if (!check(content)) {
+    if (!QueueDetail::check(content)) {
       throw std::runtime_error("invalid queue");
     }
 
     header_ = std::bit_cast<MemoryHeader*>(storage_.data());
 
-    std::size_t offset = kDataOffset;
+    std::size_t offset = QueueDetail::kDataStartPos;
     data_ = std::span<std::byte>(content.data() + offset, header_->maxMessageSize * header_->length);
 
     offset += header_->maxMessageSize * header_->length;
     commitStates_ = std::span<StateHeader>(std::bit_cast<StateHeader*>(storage_.data() + offset), header_->length);
 
-    localProducerPos_ = std::atomic_ref(header_->producerPos).load(std::memory_order_acquire);
-    localConsumerPos_ = std::atomic_ref(header_->consumerPos).load(std::memory_order_acquire);
+    producerPosCache_ = std::atomic_ref(header_->producerPos).load(std::memory_order_acquire);
+    consumerPosCache_ = std::atomic_ref(header_->consumerPos).load(std::memory_order_acquire);
   }
 
   /// Return true on initialized
@@ -277,13 +296,13 @@ public:
 
   /// Get next buffer for reading. Return empty buffer in case of no data.
   [[nodiscard]] TURBOQ_FORCE_INLINE std::span<std::byte const> fetch() noexcept {
-    if ((localConsumerPos_ == localProducerPos_ &&
-            (localProducerPos_ = std::atomic_ref(header_->producerPos).load(std::memory_order_acquire)) ==
-                localConsumerPos_)) [[unlikely]] {
+    if ((consumerPosCache_ == producerPosCache_ &&
+            (producerPosCache_ = std::atomic_ref(header_->producerPos).load(std::memory_order_acquire)) ==
+                consumerPosCache_)) [[unlikely]] {
       return {};
     }
 
-    std::size_t const consumerPos = localConsumerPos_ & (header_->length - 1);
+    std::size_t const consumerPos = consumerPosCache_ & (header_->length - 1);
 
     lastCommitState_ = &commitStates_[consumerPos];
     if (!std::atomic_ref(lastCommitState_->commited).load(std::memory_order_acquire)) [[unlikely]] {
@@ -295,22 +314,23 @@ public:
   }
 
   /// Consume front buffer and make buffer available for producer
+  /// pre: fetch() -> non empty buffer
   TURBOQ_FORCE_INLINE void consume() noexcept {
-    localConsumerPos_++;
+    consumerPosCache_++;
     std::atomic_ref(lastCommitState_->commited).store(false, std::memory_order_release);
-    std::atomic_ref(header_->consumerPos).store(localConsumerPos_, std::memory_order_release);
+    std::atomic_ref(header_->consumerPos).store(consumerPosCache_, std::memory_order_release);
   }
 
   /// Reset queue
   TURBOQ_FORCE_INLINE void reset() noexcept {
-    while (localConsumerPos_ != localProducerPos_) {
+    while (consumerPosCache_ != producerPosCache_) {
       // Drop message.
-      std::size_t const consumerPos = localConsumerPos_ & (header_->length - 1);
+      std::size_t const consumerPos = consumerPosCache_ & (header_->length - 1);
       lastCommitState_ = &commitStates_[consumerPos];
       std::atomic_ref(lastCommitState_->commited).store(false, std::memory_order_release);
-      localConsumerPos_++;
+      consumerPosCache_++;
     }
-    std::atomic_ref(header_->consumerPos).store(localConsumerPos_, std::memory_order_release);
+    std::atomic_ref(header_->consumerPos).store(consumerPosCache_, std::memory_order_release);
   }
 
   /// Swap resources with other object
@@ -320,8 +340,8 @@ public:
     swap(header_, that.header_);
     swap(data_, that.data_);
     swap(commitStates_, that.commitStates_);
-    swap(localProducerPos_, that.localProducerPos_);
-    swap(localConsumerPos_, that.localConsumerPos_);
+    swap(producerPosCache_, that.producerPosCache_);
+    swap(consumerPosCache_, that.consumerPosCache_);
     swap(lastMessageHeader_, that.lastMessageHeader_);
     swap(lastCommitState_, that.lastCommitState_);
   }
@@ -332,36 +352,53 @@ public:
   }
 };
 
-} // namespace internal
+} // namespace detail
 
-class BoundedMPSCRawQueue : internal::BoundedMPSCRawQueueDetail {
+template <typename Traits>
+class BoundedMPSCRawQueueImpl;
+
+struct BoundedMPSCRawQueueDefaultTraits {
+  static constexpr std::string_view kTag = "turboq/MPSC";
+  static constexpr std::size_t kSegmentSize = kHardwareDestructiveInterferenceSize;
+  static constexpr std::size_t kAlign = kHardwareDestructiveInterferenceSize;
+};
+
+using BoundedMPSCRawQueue = BoundedMPSCRawQueueImpl<BoundedMPSCRawQueueDefaultTraits>;
+
+template <typename Traits>
+class BoundedMPSCRawQueueImpl {
 private:
+  using QueueDetail = detail::BoundedMPSCRawQueueDetail<Traits>;
+  using MemoryHeader = typename QueueDetail::MemoryHeader;
+  using MessageHeader = typename QueueDetail::MessageHeader;
+  using StateHeader = typename QueueDetail::StateHeader;
+
   File file_;
 
 public:
-  using Producer = internal::BoundedMPSCRawQueueProducer;
-  using Consumer = internal::BoundedMPSCRawQueueConsumer;
+  using Producer = detail::BoundedMPSCRawQueueProducer<Traits>;
+  using Consumer = detail::BoundedMPSCRawQueueConsumer<Traits>;
 
   struct CreationOptions {
     std::size_t maxMessageSizeHint;
     std::size_t lengthHint;
   };
 
-  BoundedMPSCRawQueue(BoundedMPSCRawQueue const&) = delete;
-  BoundedMPSCRawQueue& operator=(BoundedMPSCRawQueue const&) = delete;
-  BoundedMPSCRawQueue() = default;
+  BoundedMPSCRawQueueImpl(BoundedMPSCRawQueueImpl const&) = delete;
+  BoundedMPSCRawQueueImpl& operator=(BoundedMPSCRawQueueImpl const&) = delete;
+  BoundedMPSCRawQueueImpl() = default;
 
-  BoundedMPSCRawQueue(BoundedMPSCRawQueue&& that) noexcept {
+  BoundedMPSCRawQueueImpl(BoundedMPSCRawQueueImpl&& that) noexcept {
     swap(that);
   }
 
-  BoundedMPSCRawQueue& operator=(BoundedMPSCRawQueue&& that) noexcept {
+  BoundedMPSCRawQueueImpl& operator=(BoundedMPSCRawQueueImpl&& that) noexcept {
     swap(that);
     return *this;
   }
 
   /// Open only queue. Throws on error.
-  BoundedMPSCRawQueue(std::string_view name, MemorySource const& memorySource = DefaultMemorySource()) {
+  BoundedMPSCRawQueueImpl(std::string_view name, MemorySource const& memorySource = DefaultMemorySource()) {
     auto result = memorySource.open(name, MemorySource::OpenOnly);
     if (!result) {
       throw std::runtime_error("failed to open memory source");
@@ -370,13 +407,13 @@ public:
     std::size_t pageSize;
     std::tie(file_, pageSize) = std::move(result).assume_value();
 
-    if (auto storage = detail::mapFile(file_); !check(storage.content())) {
+    if (auto storage = detail::mapFile(file_); !QueueDetail::check(storage.content())) {
       throw std::runtime_error("failed to open queue (invalid)");
     }
   }
 
   /// Open or create queue. Throws on error.
-  BoundedMPSCRawQueue(
+  BoundedMPSCRawQueueImpl(
       std::string_view name, CreationOptions const& options, MemorySource const& memorySource = DefaultMemorySource()) {
     if (options.maxMessageSizeHint == 0) {
       throw std::runtime_error("invalid argument (max message size)");
@@ -392,25 +429,24 @@ public:
     std::size_t pageSize;
     std::tie(file_, pageSize) = std::move(result).assume_value();
 
-    auto const maxMessageSize =
-        detail::ceil(options.maxMessageSizeHint + sizeof(MessageHeader), kHardwareDestructiveInterferenceSize);
+    auto const maxMessageSize = QueueDetail::alignBufferSize(options.maxMessageSizeHint + sizeof(MessageHeader));
     auto const length = detail::upper_pow_2(options.lengthHint);
-    auto const sizeHint = detail::ceil(sizeof(MemoryHeader), kHardwareDestructiveInterferenceSize) +
-                          maxMessageSize * length + sizeof(StateHeader) * length;
+    auto const capacityHint =
+        QueueDetail::alignBufferSize(sizeof(MemoryHeader)) + maxMessageSize * length + sizeof(StateHeader) * length;
     // round-up requested size to page size
-    auto const size = detail::ceil(sizeHint, pageSize);
+    auto const capacity = detail::align_up(capacityHint, pageSize);
 
     // init queue or check queue's options is the same as requested
     if (auto const fileSize = file_.getFileSize(); fileSize != 0) {
-      if (fileSize != size) {
+      if (fileSize != capacity) {
         throw std::runtime_error("size mismatch");
       }
-      if (auto storage = detail::mapFile(file_); !check(storage.content())) {
+      if (auto storage = detail::mapFile(file_); !QueueDetail::check(storage.content())) {
         throw std::runtime_error("failed to open queue (invalid)");
       }
     } else {
-      file_.truncate(size);
-      init(detail::mapFile(file_, size).content(), maxMessageSize, length);
+      file_.truncate(capacity);
+      QueueDetail::init(detail::mapFile(file_, capacity).content(), maxMessageSize, length);
     }
   }
 
@@ -419,6 +455,7 @@ public:
     return static_cast<bool>(file_);
   }
 
+  /// Create producer for the queue. Throws on error.
   [[nodiscard]] TURBOQ_FORCE_INLINE Producer createProducer() {
     if (!operator bool()) {
       throw std::runtime_error("queue in not initialized");
@@ -426,6 +463,7 @@ public:
     return Producer(detail::mapFile(file_));
   }
 
+  /// Create consumer for the queue. Throws on error.
   [[nodiscard]] TURBOQ_FORCE_INLINE Consumer createConsumer() {
     if (!operator bool()) {
       throw std::runtime_error("queue in not initialized");
@@ -437,13 +475,13 @@ public:
   }
 
   /// Swap resources with other queue.
-  void swap(BoundedMPSCRawQueue& that) noexcept {
+  void swap(BoundedMPSCRawQueueImpl& that) noexcept {
     using std::swap;
     swap(file_, that.file_);
   }
 
-  /// \see BoundedMPSCRawQueue::swap
-  friend void swap(BoundedMPSCRawQueue& a, BoundedMPSCRawQueue& b) noexcept {
+  /// \see BoundedMPSCRawQueueImpl::swap
+  friend void swap(BoundedMPSCRawQueueImpl& a, BoundedMPSCRawQueueImpl& b) noexcept {
     a.swap(b);
   }
 };

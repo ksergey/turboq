@@ -4,16 +4,21 @@
 #pragma once
 
 #include <bit>
+#include <concepts>
 #include <cstddef>
 
 namespace turboq::detail {
 
-[[nodiscard]] constexpr std::size_t upper_pow_2(std::size_t value) noexcept {
-  return std::bit_ceil<std::size_t>(value);
+template <typename T>
+  requires std::integral<T>
+[[nodiscard]] constexpr T upper_pow_2(T value) noexcept {
+  return std::bit_ceil<T>(value);
 }
 
-[[nodiscard]] constexpr std::size_t ceil(std::size_t value, std::size_t mult) noexcept {
-  return ((value + mult - 1) / mult) * mult;
+template <typename T>
+  requires std::integral<T>
+[[nodiscard]] constexpr T align_up(T value, T align) noexcept {
+  return ((value + align - 1) / align) * align;
 }
 
 } // namespace turboq::detail
