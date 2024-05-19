@@ -18,6 +18,8 @@
 #include <turboq/detail/mmap.h>
 #include <turboq/platform.h>
 
+#include <fmt/format.h>
+
 namespace turboq {
 namespace internal {
 
@@ -106,9 +108,10 @@ public:
 
     auto const consumerPos = std::atomic_ref(header_->consumerPos).load(std::memory_order_acquire);
     if (consumerPos > producerPosCache_) {
-      minFreeSpace_ = consumerPos - producerPosCache_;
+      // queue is empty in case of consumerPos == producerPos
+      minFreeSpace_ = consumerPos - producerPosCache_ - 1;
     } else {
-      // Reserve space at end for MessageHeader
+      // Reserve space at end for last MessageHeader
       minFreeSpace_ = data_.size() - producerPosCache_ - sizeof(MessageHeader);
     }
   }
@@ -129,19 +132,16 @@ public:
       lastMessageHeader_->payloadSize = size;
       lastMessageHeader_->payloadOffset = producerPosCache_ + sizeof(MessageHeader);
       producerPosCache_ += alignedSize;
-
       minFreeSpace_ -= alignedSize;
 
       return data_.subspan(lastMessageHeader_->payloadOffset, lastMessageHeader_->payloadSize);
     }
 
     auto const consumerPosCache = std::atomic_ref(header_->consumerPos).load(std::memory_order_acquire);
+
     if (consumerPosCache > producerPosCache_) {
-      // in case of consumerPosCache == producerPosCache_ then queue is empty
-
-      minFreeSpace_ = consumerPosCache - producerPosCache_;
-
-      assert(minFreeSpace_ >= sizeof(MessageHeader));
+      // queue is empty in case of consumerPos == producerPos
+      minFreeSpace_ = consumerPosCache - producerPosCache_ - 1;
 
       if (alignedSize <= minFreeSpace_) [[likely]] {
         lastMessageHeader_ = std::bit_cast<MessageHeader*>(data_.data() + producerPosCache_);
@@ -149,7 +149,6 @@ public:
         lastMessageHeader_->payloadSize = size;
         lastMessageHeader_->payloadOffset = producerPosCache_ + sizeof(MessageHeader);
         producerPosCache_ += alignedSize;
-
         minFreeSpace_ -= alignedSize;
 
         return data_.subspan(lastMessageHeader_->payloadOffset, lastMessageHeader_->payloadSize);
@@ -158,6 +157,7 @@ public:
       assert(sizeof(MessageHeader) <= (data_.size() - producerPosCache_));
 
       minFreeSpace_ = data_.size() - producerPosCache_ - sizeof(MessageHeader);
+
       if (alignedSize <= minFreeSpace_) [[likely]] {
         lastMessageHeader_ = std::bit_cast<MessageHeader*>(data_.data() + producerPosCache_);
         lastMessageHeader_->size = alignedSize - sizeof(MessageHeader);
@@ -169,14 +169,15 @@ public:
         return data_.subspan(lastMessageHeader_->payloadOffset, lastMessageHeader_->payloadSize);
       }
 
-      if (alignedSize - sizeof(MessageHeader) < consumerPosCache) {
+      // align payload to cache-line size when payload starts from begining
+      std::size_t const alignedSize2 = detail::ceil(size, kHardwareDestructiveInterferenceSize);
+      if (alignedSize2 < consumerPosCache) {
         lastMessageHeader_ = std::bit_cast<MessageHeader*>(data_.data() + producerPosCache_);
-        lastMessageHeader_->size = alignedSize - sizeof(MessageHeader);
+        lastMessageHeader_->size = alignedSize2;
         lastMessageHeader_->payloadSize = size;
         lastMessageHeader_->payloadOffset = 0;
         producerPosCache_ = lastMessageHeader_->size;
-
-        minFreeSpace_ = consumerPosCache - producerPosCache_;
+        minFreeSpace_ = consumerPosCache - producerPosCache_ - 1;
 
         return data_.subspan(lastMessageHeader_->payloadOffset, lastMessageHeader_->payloadSize);
       }
@@ -225,6 +226,7 @@ private:
   std::span<std::byte> data_;
   std::size_t consumerPosCache_ = 0;
   std::size_t producerPosCache_ = 0;
+  MessageHeader* lastMessageHeader_ = nullptr;
 
 public:
   BoundedSPSCRawQueueConsumer() = default;
@@ -265,14 +267,15 @@ public:
       return {};
     }
 
-    MessageHeader const* header = std::bit_cast<MessageHeader*>(data_.data() + consumerPosCache_);
-    consumerPosCache_ = header->payloadOffset + header->size;
+    lastMessageHeader_ = std::bit_cast<MessageHeader*>(data_.data() + consumerPosCache_);
 
-    return {data_.data() + header->payloadOffset, header->payloadSize};
+    return data_.subspan(lastMessageHeader_->payloadOffset, lastMessageHeader_->payloadSize);
   }
 
   /// Consume front buffer and make buffer available for producer
+  /// pre: fetch() -> non empty buffer
   TURBOQ_FORCE_INLINE void consume() noexcept {
+    consumerPosCache_ = lastMessageHeader_->payloadOffset + lastMessageHeader_->size;
     std::atomic_ref(header_->consumerPos).store(consumerPosCache_, std::memory_order_release);
   }
 
@@ -291,6 +294,7 @@ public:
     swap(data_, that.data_);
     swap(consumerPosCache_, that.consumerPosCache_);
     swap(producerPosCache_, that.producerPosCache_);
+    swap(lastMessageHeader_, that.lastMessageHeader_);
   }
 
   /// \see BoundedSPSCRawQueueConsumer::swap

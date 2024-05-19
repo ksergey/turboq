@@ -20,20 +20,6 @@
 
 namespace turboq::benchmark {
 
-/// Do not optimize variable
-template <typename T, typename D = std::decay_t<T>>
-TURBOQ_FORCE_INLINE void doNotOptimize(T const& t) noexcept {
-  // https://github.com/facebook/folly/blob/main/folly/lang/Hint-inl.h
-  constexpr auto compilerMustForceIndirect =
-      !std::is_trivially_copyable_v<D> or sizeof(long) < sizeof(D) or std::is_pointer_v<D>;
-
-  if constexpr (compilerMustForceIndirect) {
-    asm volatile("" : : "m"(t) : "memory");
-  } else {
-    asm volatile("" : : "r"(t));
-  }
-}
-
 /// Return cycles counter
 TURBOQ_FORCE_INLINE std::uint64_t rdtsc() noexcept {
   return __builtin_ia32_rdtsc();
@@ -150,8 +136,8 @@ inline void annotate(std::vector<std::tuple<char const*, BenchmarkRunResult>> co
   constexpr auto kNameFieldLength = 25;
   constexpr auto kValueFieldLength = 8;
 
-  fmt::print(
-      "{:<{}} {:>{}} {:>{}}\n", "name", kNameFieldLength, "mean", kValueFieldLength + 3, "stddev", kValueFieldLength + 3);
+  fmt::print("{:<{}} {:>{}} {:>{}}\n", "name", kNameFieldLength, "mean", kValueFieldLength + 3, "stddev",
+      kValueFieldLength + 3);
   fmt::print("{:-^{}}\n", "", 25 + 1 + 2 * (3 + kValueFieldLength + 1) - 1);
 
   for (auto const& [name, result] : results) {
