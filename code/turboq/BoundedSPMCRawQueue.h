@@ -120,6 +120,8 @@ public:
 
     if (producerPosCache_ + alignedSize + sizeof(MessageHeader) > data_.size()) [[unlikely]] {
       producerPosCache_ = 0;
+      // TODO[???]:
+      // lastMessageHeader_->size = detail::ceil(size, kHardwareDestructiveInterferenceSize)
     } else {
       producerPosCache_ += sizeof(MessageHeader);
     }
@@ -170,6 +172,7 @@ private:
   MemoryHeader* header_ = nullptr;
   std::size_t consumerPosCache_ = 0;
   std::size_t producerPosCache_ = 0;
+  MessageHeader* lastMessageHeader_ = nullptr;
 
 public:
   BoundedSPMCRawQueueConsumer() = default;
@@ -215,14 +218,15 @@ public:
       return {};
     }
 
-    MessageHeader const* header = std::bit_cast<MessageHeader*>(data_.data() + consumerPosCache_);
-    consumerPosCache_ = header->payloadOffset + header->size;
-
-    return {data_.data() + header->payloadOffset, header->payloadSize};
+    lastMessageHeader_ = std::bit_cast<MessageHeader*>(data_.data() + consumerPosCache_);
+    return data_.subspan(lastMessageHeader_->payloadOffset, lastMessageHeader_->payloadSize);
   }
 
-  /// Do nothing. Just for interface.
-  TURBOQ_FORCE_INLINE void consume() noexcept {}
+  /// Consume buffer and make buffer space available for producer
+  /// pre: fetch() -> non empty buffer
+  TURBOQ_FORCE_INLINE void consume() noexcept {
+    consumerPosCache_ = lastMessageHeader_->payloadOffset + lastMessageHeader_->size;
+  }
 
   /// Reset queue
   TURBOQ_FORCE_INLINE void reset() noexcept {
@@ -238,6 +242,7 @@ public:
     swap(header_, that.header_);
     swap(consumerPosCache_, that.consumerPosCache_);
     swap(producerPosCache_, that.producerPosCache_);
+    swap(lastMessageHeader_, that.lastMessageHeader_);
   }
 
   /// \see BoundedSPMCRawQueueConsumer::swap

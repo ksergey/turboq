@@ -91,8 +91,8 @@ private:
   MemoryHeader* header_ = nullptr;
   std::span<std::byte> data_;
   std::span<StateHeader> commitStates_;
-  std::size_t localProducerPos_ = 0;
-  std::size_t localConsumerPos_ = 0;
+  std::size_t producerPosCache_ = 0;
+  std::size_t consumerPosCache_ = 0;
 
 public:
   BoundedMPSCRawQueueProducer() = default;
@@ -121,7 +121,7 @@ public:
     offset += (header_->maxMessageSize * header_->length);
 
     commitStates_ = std::span<StateHeader>(std::bit_cast<StateHeader*>(storage_.data() + offset), header_->length);
-    localConsumerPos_ = std::atomic_ref(header_->consumerPos).load(std::memory_order_acquire);
+    consumerPosCache_ = std::atomic_ref(header_->consumerPos).load(std::memory_order_acquire);
   }
 
   /// Return true on initialized
@@ -155,9 +155,9 @@ public:
     }
 
     std::size_t currentProducerPos = std::atomic_ref(header_->producerPos).load(std::memory_order_acquire);
-    if (currentProducerPos - localConsumerPos_ >= header_->length) [[unlikely]] {
-      localConsumerPos_ = std::atomic_ref(header_->consumerPos).load(std::memory_order_acquire);
-      if (currentProducerPos - localConsumerPos_ >= header_->length) [[unlikely]] {
+    if (currentProducerPos - consumerPosCache_ >= header_->length) [[unlikely]] {
+      consumerPosCache_ = std::atomic_ref(header_->consumerPos).load(std::memory_order_acquire);
+      if (currentProducerPos - consumerPosCache_ >= header_->length) [[unlikely]] {
         return {};
       }
     }
@@ -165,13 +165,13 @@ public:
     while (!std::atomic_ref(header_->producerPos)
                 .compare_exchange_weak(currentProducerPos, currentProducerPos + 1, std::memory_order_release,
                     std::memory_order_relaxed)) [[unlikely]] {
-      if (currentProducerPos - localConsumerPos_ >= header_->length) [[unlikely]] {
+      if (currentProducerPos - consumerPosCache_ >= header_->length) [[unlikely]] {
         return {};
       }
     }
 
-    localProducerPos_ = currentProducerPos & (header_->length - 1);
-    std::byte* content = data_.data() + localProducerPos_ * header_->maxMessageSize;
+    producerPosCache_ = currentProducerPos & (header_->length - 1);
+    std::byte* content = data_.data() + producerPosCache_ * header_->maxMessageSize;
     std::bit_cast<MessageHeader*>(content)->payloadSize = size;
 
     return {content + sizeof(MessageHeader), size};
@@ -179,12 +179,12 @@ public:
 
   /// Make reserved buffer visible for consumers
   TURBOQ_FORCE_INLINE void commit() noexcept {
-    std::atomic_ref(commitStates_[localProducerPos_].commited).store(true, std::memory_order_release);
+    std::atomic_ref(commitStates_[producerPosCache_].commited).store(true, std::memory_order_release);
   }
 
   /// \overload
   TURBOQ_FORCE_INLINE void commit(std::size_t size) noexcept {
-    auto header = std::bit_cast<MessageHeader*>(data_.data() + localProducerPos_ * header_->maxMessageSize);
+    auto header = std::bit_cast<MessageHeader*>(data_.data() + producerPosCache_ * header_->maxMessageSize);
     if (size <= header->payloadSize) [[likely]] {
       header->payloadSize = size;
     } else {
@@ -200,8 +200,8 @@ public:
     swap(header_, that.header_);
     swap(data_, that.data_);
     swap(commitStates_, that.commitStates_);
-    swap(localProducerPos_, that.localProducerPos_);
-    swap(localConsumerPos_, that.localConsumerPos_);
+    swap(producerPosCache_, that.producerPosCache_);
+    swap(consumerPosCache_, that.consumerPosCache_);
   }
 
   /// \see BoundedMPSCRawQueueProducer::swap
@@ -217,8 +217,8 @@ private:
   MemoryHeader* header_ = nullptr;
   std::span<std::byte> data_;
   std::span<StateHeader> commitStates_;
-  std::size_t localProducerPos_ = 0;
-  std::size_t localConsumerPos_ = 0;
+  std::size_t producerPosCache_ = 0;
+  std::size_t consumerPosCache_ = 0;
   MessageHeader* lastMessageHeader_ = nullptr;
   StateHeader* lastCommitState_ = nullptr;
 
@@ -250,8 +250,8 @@ public:
     offset += header_->maxMessageSize * header_->length;
     commitStates_ = std::span<StateHeader>(std::bit_cast<StateHeader*>(storage_.data() + offset), header_->length);
 
-    localProducerPos_ = std::atomic_ref(header_->producerPos).load(std::memory_order_acquire);
-    localConsumerPos_ = std::atomic_ref(header_->consumerPos).load(std::memory_order_acquire);
+    producerPosCache_ = std::atomic_ref(header_->producerPos).load(std::memory_order_acquire);
+    consumerPosCache_ = std::atomic_ref(header_->consumerPos).load(std::memory_order_acquire);
   }
 
   /// Return true on initialized
@@ -277,13 +277,13 @@ public:
 
   /// Get next buffer for reading. Return empty buffer in case of no data.
   [[nodiscard]] TURBOQ_FORCE_INLINE std::span<std::byte const> fetch() noexcept {
-    if ((localConsumerPos_ == localProducerPos_ &&
-            (localProducerPos_ = std::atomic_ref(header_->producerPos).load(std::memory_order_acquire)) ==
-                localConsumerPos_)) [[unlikely]] {
+    if ((consumerPosCache_ == producerPosCache_ &&
+            (producerPosCache_ = std::atomic_ref(header_->producerPos).load(std::memory_order_acquire)) ==
+                consumerPosCache_)) [[unlikely]] {
       return {};
     }
 
-    std::size_t const consumerPos = localConsumerPos_ & (header_->length - 1);
+    std::size_t const consumerPos = consumerPosCache_ & (header_->length - 1);
 
     lastCommitState_ = &commitStates_[consumerPos];
     if (!std::atomic_ref(lastCommitState_->commited).load(std::memory_order_acquire)) [[unlikely]] {
@@ -295,22 +295,23 @@ public:
   }
 
   /// Consume front buffer and make buffer available for producer
+  /// pre: fetch() -> non empty buffer
   TURBOQ_FORCE_INLINE void consume() noexcept {
-    localConsumerPos_++;
+    consumerPosCache_++;
     std::atomic_ref(lastCommitState_->commited).store(false, std::memory_order_release);
-    std::atomic_ref(header_->consumerPos).store(localConsumerPos_, std::memory_order_release);
+    std::atomic_ref(header_->consumerPos).store(consumerPosCache_, std::memory_order_release);
   }
 
   /// Reset queue
   TURBOQ_FORCE_INLINE void reset() noexcept {
-    while (localConsumerPos_ != localProducerPos_) {
+    while (consumerPosCache_ != producerPosCache_) {
       // Drop message.
-      std::size_t const consumerPos = localConsumerPos_ & (header_->length - 1);
+      std::size_t const consumerPos = consumerPosCache_ & (header_->length - 1);
       lastCommitState_ = &commitStates_[consumerPos];
       std::atomic_ref(lastCommitState_->commited).store(false, std::memory_order_release);
-      localConsumerPos_++;
+      consumerPosCache_++;
     }
-    std::atomic_ref(header_->consumerPos).store(localConsumerPos_, std::memory_order_release);
+    std::atomic_ref(header_->consumerPos).store(consumerPosCache_, std::memory_order_release);
   }
 
   /// Swap resources with other object
@@ -320,8 +321,8 @@ public:
     swap(header_, that.header_);
     swap(data_, that.data_);
     swap(commitStates_, that.commitStates_);
-    swap(localProducerPos_, that.localProducerPos_);
-    swap(localConsumerPos_, that.localConsumerPos_);
+    swap(producerPosCache_, that.producerPosCache_);
+    swap(consumerPosCache_, that.consumerPosCache_);
     swap(lastMessageHeader_, that.lastMessageHeader_);
     swap(lastCommitState_, that.lastCommitState_);
   }

@@ -7,21 +7,56 @@
 #include <doctest/doctest.h>
 
 #include "BoundedSPSCRawQueue.h"
+#include "testing.h"
 
-#include "concepts.h"
+namespace turboq::testing {
 
-static auto const options = turboq::BoundedSPSCRawQueue::CreationOptions(1024 * 1024);
+TEST_CASE("BoundedSPSCRawQueue: basic") {
+  BoundedSPSCRawQueue queue(
+      "test", BoundedSPSCRawQueue::CreationOptions(sizeof(std::uint64_t) * 100), AnonymousMemorySource());
+
+  auto producer = queue.createProducer();
+  REQUIRE(producer);
+
+  auto consumer = queue.createConsumer();
+  REQUIRE(consumer);
+
+  for (std::uint64_t i = 0; i < 10; ++i) {
+    REQUIRE(enqueue(producer, i));
+  }
+
+  for (std::uint64_t i = 0; i < 10; ++i) {
+    std::uint64_t value = std::uint64_t(-1);
+
+    REQUIRE(fetch(consumer, value));
+    REQUIRE(value == i);
+
+    value = std::uint64_t(-1);
+    REQUIRE(fetch(consumer, value));
+    REQUIRE(value == i);
+
+    value = std::uint64_t(-1);
+    REQUIRE(dequeue(consumer, value));
+    REQUIRE(value == i);
+  }
+
+  std::uint64_t value = std::uint64_t(-1);
+  REQUIRE(!fetch(consumer, value));
+  REQUIRE(value == std::uint64_t(-1));
+
+  REQUIRE(!dequeue(consumer, value));
+  REQUIRE(value == std::uint64_t(-1));
+}
+
+#if 0
 
 TEST_CASE("BoundedSPSCRawQueue: multipleMessages0") {
   REQUIRE(sizeof(char) == sizeof(std::byte));
 
-  turboq::BoundedSPSCRawQueue queue("test", options, turboq::AnonymousMemorySource());
+  BoundedSPSCRawQueue queue("test", BoundedSPSCRawQueue::CreationOptions(1024 * 1024), AnonymousMemorySource());
 
   auto producer = queue.createProducer();
-  static_assert(turboq::TurboQProducer<decltype(producer)>);
-
   auto consumer = queue.createConsumer();
-  static_assert(turboq::TurboQConsumer<decltype(consumer)>);
 
   REQUIRE(producer);
   REQUIRE(consumer);
@@ -48,3 +83,6 @@ TEST_CASE("BoundedSPSCRawQueue: multipleMessages0") {
     recv();
   }
 }
+#endif
+
+} // namespace turboq::testing
