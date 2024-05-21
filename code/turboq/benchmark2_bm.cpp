@@ -71,29 +71,29 @@ void benchmarkBoundedMPSCRawQueue(std::vector<std::tuple<char const*, BenchmarkR
   BenchmarkOptions opts;
 
   opts.producersCoreSet = {-1};
-  results.emplace_back("mpsc queue p=1 c=1", benchmarkQueue(queue, opts));
+  results.emplace_back("MSPC queue p=1 c=1", benchmarkQueue(queue, opts));
 
   opts.producersCoreSet = {-1, -1};
-  results.emplace_back("mpsc queue p=2 c=1", benchmarkQueue(queue, opts));
+  results.emplace_back("MPSC queue p=2 c=1", benchmarkQueue(queue, opts));
 
   opts.producersCoreSet = {-1, -1, -1};
-  results.emplace_back("mpsc queue p=3 c=1", benchmarkQueue(queue, opts));
+  results.emplace_back("MPSC queue p=3 c=1", benchmarkQueue(queue, opts));
 
   opts.producersCoreSet = {-1, -1, -1, -1};
-  results.emplace_back("mpsc queue p=4 c=1", benchmarkQueue(queue, opts));
+  results.emplace_back("MPSC queue p=4 c=1", benchmarkQueue(queue, opts));
 
   opts.consumersCoreSet = {0};
   opts.producersCoreSet = {1};
-  results.emplace_back("mpsc queue pinned p=1 c=1", benchmarkQueue(queue, opts));
+  results.emplace_back("MPSC queue [p] p=1 c=1", benchmarkQueue(queue, opts));
 
   opts.producersCoreSet = {1, 2};
-  results.emplace_back("mpsc queue pinned p=2 c=1", benchmarkQueue(queue, opts));
+  results.emplace_back("MPSC queue [p] p=2 c=1", benchmarkQueue(queue, opts));
 
   opts.producersCoreSet = {1, 2, 3};
-  results.emplace_back("mpsc queue pinned p=3 c=1", benchmarkQueue(queue, opts));
+  results.emplace_back("MPSC queue [p] p=3 c=1", benchmarkQueue(queue, opts));
 
   opts.producersCoreSet = {1, 2, 3, 4};
-  results.emplace_back("mpsc queue pinned p=4 c=1", benchmarkQueue(queue, opts));
+  results.emplace_back("MPSC queue [p] p=4 c=1", benchmarkQueue(queue, opts));
 }
 
 void benchmarkBoundedSPSCRawQueue(std::vector<std::tuple<char const*, BenchmarkRunResult>>& results) {
@@ -103,11 +103,11 @@ void benchmarkBoundedSPSCRawQueue(std::vector<std::tuple<char const*, BenchmarkR
 
   BenchmarkOptions opts;
 
-  results.emplace_back("spsc queue p=1 c=1", benchmarkQueue(queue, opts));
+  results.emplace_back("SPSC queue p=1 c=1", benchmarkQueue(queue, opts));
 
   opts.consumersCoreSet = {0};
   opts.producersCoreSet = {1};
-  results.emplace_back("spsc queue pinned p=1 c=1", benchmarkQueue(queue, opts));
+  results.emplace_back("SPSC queue [p] p=1 c=1", benchmarkQueue(queue, opts));
 }
 
 void benchmarkBoundedSPMCRawQueue(std::vector<std::tuple<char const*, BenchmarkRunResult>>& results) {
@@ -119,16 +119,16 @@ void benchmarkBoundedSPMCRawQueue(std::vector<std::tuple<char const*, BenchmarkR
       "benchmark", BoundedSPMCRawQueue::CreationOptions(opts.totalOps * sizeof(int)), AnonymousMemorySource());
 
   opts.consumersCoreSet = {-1};
-  results.emplace_back("spmc queue p=1 c=1", benchmarkQueue(queue, opts));
+  results.emplace_back("SPMC queue p=1 c=1", benchmarkQueue(queue, opts));
 
   opts.consumersCoreSet = {-1, -1};
-  results.emplace_back("spmc queue p=1 c=2", benchmarkQueue(queue, opts));
+  results.emplace_back("SPMC queue p=1 c=2", benchmarkQueue(queue, opts));
 
   opts.consumersCoreSet = {-1, -1, -1};
-  results.emplace_back("spmc queue p=1 c=3", benchmarkQueue(queue, opts));
+  results.emplace_back("SPMC queue p=1 c=3", benchmarkQueue(queue, opts));
 
   opts.consumersCoreSet = {-1, -1, -1, -1};
-  results.emplace_back("spmc queue p=1 c=4", benchmarkQueue(queue, opts));
+  results.emplace_back("SPMC queue p=1 c=4", benchmarkQueue(queue, opts));
 }
 
 int main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[]) {
