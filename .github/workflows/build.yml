@@ -112,6 +112,7 @@ jobs:
         shell: bash
         working-directory: ${{ env.HOME }}
         run: |
+          sudo add-apt-repository ppa:ubuntu-toolchain-r/ppa -y
           sudo apt update
           sudo apt install -y g++-13 gcc-13
 
