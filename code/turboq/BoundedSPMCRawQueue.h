@@ -139,6 +139,8 @@ public:
     if (producerPosCache_ + alignedSize + sizeof(MessageHeader) > data_.size()) [[unlikely]] {
       lastMessageHeader_->size = QueueDetail::alignBufferSize(size);
       producerPosCache_ = 0;
+      // TODO[???]:
+      // lastMessageHeader_->size = detail::ceil(size, kHardwareDestructiveInterferenceSize)
     } else {
       producerPosCache_ += sizeof(MessageHeader);
     }

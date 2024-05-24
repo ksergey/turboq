@@ -146,7 +146,6 @@ int main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[]) {
     ;
     // clang-format on
     // TODO: add repeats, bind cpus, ops, etc options
-
     auto result = options.parse(argc, argv);
 
     if (result.count("help")) {
@@ -163,7 +162,6 @@ int main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[]) {
     } else {
       benchmarkBoundedMPSCRawQueue(results);
       benchmarkBoundedSPSCRawQueue(results);
-
       // benchmarkBoundedSPMCRawQueue(results);
     }
 

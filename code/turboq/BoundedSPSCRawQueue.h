@@ -18,6 +18,8 @@
 #include <turboq/detail/mmap.h>
 #include <turboq/platform.h>
 
+#include <fmt/format.h>
+
 namespace turboq {
 namespace detail {
 
