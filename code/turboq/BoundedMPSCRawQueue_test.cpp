@@ -8,7 +8,7 @@
 #include <doctest/doctest.h>
 
 #include "BoundedMPSCRawQueue.h"
-#include "testing.h"
+#include "utils.h"
 
 namespace turboq::testing {
 
@@ -58,45 +58,5 @@ TEST_CASE("BoundedMPSCRawQueue: basic") {
   REQUIRE(!dequeue(consumer, value));
   REQUIRE(value == std::uint64_t(-1));
 }
-
-#if 0
-TEST_CASE("BoundedMPSCRawQueue: multipleMessages0") {
-  REQUIRE(sizeof(char) == sizeof(std::byte));
-
-  BoundedMPSCRawQueue queue("test", BoundedMPSCRawQueue::CreationOptions(512, 1000), AnonymousMemorySource());
-
-  auto producer = queue.createProducer();
-  auto consumer = queue.createConsumer();
-
-  REQUIRE(producer);
-  REQUIRE(consumer);
-
-  std::string data(256, 'a');
-
-  auto send = [&producer, &data] {
-    auto buffer = producer.prepare(data.size());
-    REQUIRE(!buffer.empty());
-    std::copy(data.begin(), data.end(), std::bit_cast<char*>(buffer.data()));
-    producer.commit();
-  };
-
-  auto recv = [&consumer, &data] {
-    auto buffer = consumer.fetch();
-    REQUIRE(!buffer.empty());
-    std::string str(std::bit_cast<char const*>(buffer.data()), buffer.size());
-    consumer.consume();
-    REQUIRE_EQ(str, data);
-  };
-
-  for (std::size_t i = 0; i < 1000; ++i) {
-    for (std::size_t j = 0; j < 100; ++j) {
-      send();
-    }
-    for (std::size_t j = 0; j < 100; ++j) {
-      recv();
-    }
-  }
-}
-#endif
 
 } // namespace turboq::testing

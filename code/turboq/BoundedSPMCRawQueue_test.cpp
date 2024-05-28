@@ -7,7 +7,7 @@
 #include <doctest/doctest.h>
 
 #include "BoundedSPMCRawQueue.h"
-#include "testing.h"
+#include "utils.h"
 
 namespace turboq::testing {
 
@@ -46,40 +46,5 @@ TEST_CASE("BoundedSPMCRawQueue: basic") {
   REQUIRE(!dequeue(consumer, value));
   REQUIRE(value == std::uint64_t(-1));
 }
-
-#if 0
-TEST_CASE("BoundedSPMCRawQueue: multipleMessages0") {
-  REQUIRE(sizeof(char) == sizeof(std::byte));
-
-  BoundedSPMCRawQueue queue("test", BoundedSPMCRawQueue::CreationOptions(1024 * 1024), AnonymousMemorySource());
-
-  auto producer = queue.createProducer();
-  auto consumer = queue.createConsumer();
-
-  REQUIRE(producer);
-  REQUIRE(consumer);
-
-  std::string data(512, 'a');
-
-  auto send = [&producer, &data] {
-    auto buffer = producer.prepare(data.size());
-    REQUIRE(!buffer.empty());
-    std::copy(data.begin(), data.end(), std::bit_cast<char*>(buffer.data()));
-    producer.commit();
-  };
-
-  auto recv = [&consumer, &data] {
-    auto buffer = consumer.fetch();
-    REQUIRE(!buffer.empty());
-    std::string str(std::bit_cast<char const*>(buffer.data()), buffer.size());
-    REQUIRE_EQ(str, data);
-  };
-
-  for (std::size_t i = 0; i < 10000; ++i) {
-    send();
-    recv();
-  }
-}
-#endif
 
 } // namespace turboq::testing

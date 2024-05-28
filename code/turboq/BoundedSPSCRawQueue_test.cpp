@@ -7,7 +7,7 @@
 #include <doctest/doctest.h>
 
 #include "BoundedSPSCRawQueue.h"
-#include "testing.h"
+#include "utils.h"
 
 namespace turboq::testing {
 

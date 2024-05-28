@@ -9,7 +9,7 @@
 #include "concepts.h"
 #include "platform.h"
 
-namespace turboq::testing {
+namespace turboq {
 
 template <typename Producer, typename Data>
   requires TurboQProducer<Producer> and std::is_trivially_copyable_v<Data>
@@ -32,10 +32,8 @@ TURBOQ_FORCE_INLINE bool dequeue(Consumer& consumer, Data& data) {
   if (buffer.empty()) {
     return false;
   }
-
   data = *std::bit_cast<Data const*>(buffer.data());
   consumer.consume();
-
   return true;
 }
 
@@ -46,10 +44,8 @@ TURBOQ_FORCE_INLINE bool fetch(Consumer& consumer, Data& data) {
   if (buffer.empty()) {
     return false;
   }
-
   data = *std::bit_cast<Data const*>(buffer.data());
-
   return true;
 }
 
-} // namespace turboq::testing
+} // namespace turboq

@@ -23,7 +23,7 @@ TurboQAddTestsFromSourceList(Sources
 TurboQAddBenchmarksFromSourceList(Sources
   PREFIX ${TargetName}
   OPTIONS -Wall -Wextra
-  LIBS fmt::fmt ${TargetName} cxxopts::cxxopts)
+  LIBS benchmark::benchmark_main ${TargetName} fmt::fmt cxxopts::cxxopts)
 
 TurboQExcludeTestsAndBenchmarksFromSourceList(Sources)
 
