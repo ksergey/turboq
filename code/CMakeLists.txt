@@ -5,8 +5,8 @@ target_compile_features(${TargetName}
   PUBLIC cxx_std_20)
 target_compile_options(${TargetName}
   PUBLIC -Wall -Wextra -Wattributes -Wpedantic -Wstrict-aliasing -Wcast-align -g)
-target_compile_options(${TargetName}
-  PRIVATE -fno-rtti)
+# target_compile_options(${TargetName}
+#   PRIVATE -fno-rtti)
 target_include_directories(${TargetName}
   PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(${TargetName}
@@ -17,13 +17,35 @@ file(GLOB_RECURSE Headers "${CMAKE_CURRENT_SOURCE_DIR}/turboq/*.h")
 
 TurboQAddTestsFromSourceList(Sources
   PREFIX ${TargetName}
-  OPTIONS -Wall -Wextra
+  COMPILE_OPTIONS -Wall -Wextra -g
   LIBS doctest::doctest_with_main ${TargetName})
+
+if (TurboQ_Sanitize)
+  foreach (sanitizer IN ITEMS asan tsan ubsan)
+    if (TARGET turboq::${sanitizer})
+      TurboQAddTestsFromSourceList(Sources
+        PREFIX ${TargetName}-${sanitizer}
+        COMPILE_OPTIONS -Wall -Wextra -g
+        LIBS doctest::doctest_with_main ${TargetName} turboq::${sanitizer})
+    endif()
+  endforeach()
+endif()
 
 TurboQAddBenchmarksFromSourceList(Sources
   PREFIX ${TargetName}
-  OPTIONS -Wall -Wextra
-  LIBS benchmark::benchmark_main ${TargetName} fmt::fmt cxxopts::cxxopts)
+  COMPILE_OPTIONS -Wall -Wextra -g
+  LIBS benchmark::benchmark_main ${TargetName} fmt::fmt)
+
+if (TurboQ_Sanitize)
+  foreach (sanitizer IN ITEMS asan tsan ubsan)
+    if (TARGET turboq::${sanitizer})
+      TurboQAddBenchmarksFromSourceList(Sources
+        PREFIX ${TargetName}-${sanitizer}
+        COMPILE_OPTIONS -Wall -Wextra -g
+        LIBS benchmark::benchmark_main ${TargetName} fmt::fmt turboq::${sanitizer})
+    endif()
+  endforeach()
+endif()
 
 TurboQExcludeTestsAndBenchmarksFromSourceList(Sources)
 

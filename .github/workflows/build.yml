@@ -152,6 +152,7 @@ jobs:
               -DCMAKE_BUILD_TYPE=${{ matrix.config.build_type }}
               -DCMAKE_MAKE_PROGRAM=ninja
               -DCMAKE_VERBOSE_MAKEFILE=ON
+              -DTurboQ_Sanitize=ON
               ${{ matrix.config.cmake_args }}
             RESULT_VARIABLE result
           )
