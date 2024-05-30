@@ -1,4 +1,4 @@
-name: Build
+name: build-and-test
 
 on: [push]
 
@@ -9,19 +9,18 @@ env:
 jobs:
   build:
     name: ${{ matrix.os }}.${{ matrix.compiler }}.${{ matrix.build_type }}
-    runs-on: ${{matrix.os}}
+    runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        build_type: ['Debug', 'Release']
-        os: ['ubuntu-22.04']
-          # sanitizer: ['asan', 'ubsan', 'tsan', 'msan']
-        compiler: ['gcc-12', 'gcc-13', 'clang-16', 'clang-17']
+        build_type: [ 'Debug', 'Release' ]
+        os: [ 'ubuntu-22.04' ]
+        compiler: [ 'gcc-12', 'gcc-13', 'clang-16', 'clang-17' ]
 
     steps:
       - uses: actions/checkout@v3
 
-      - name: Download Ninja and CMake
+      - name: download ninja and cmake
         id: cmake_and_ninja
         shell: cmake -P {0}
         run: |
@@ -87,7 +86,7 @@ jobs:
           echo "CC=clang-16" >> $GITHUB_ENV
           echo "CXX=clang++-16" >> $GITHUB_ENV
 
-      - name: Install clang-17
+      - name: install clang-17
         id: install_clang_17
         if: matrix.compiler == 'clang-17'
         shell: bash
@@ -114,6 +113,8 @@ jobs:
               -G Ninja
               -DCMAKE_BUILD_TYPE=${{ matrix.config.build_type }}
               -DCMAKE_MAKE_PROGRAM=ninja
+              -DCMAKE_C_COMPILER=${{ env.CC }}
+              -DCMAKE_CXX_COMPILER=${{ env.CXX }}
               -DCMAKE_VERBOSE_MAKEFILE=ON
             RESULT_VARIABLE result
           )
