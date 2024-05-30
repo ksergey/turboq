@@ -100,8 +100,8 @@ jobs:
               -DCMAKE_MAKE_PROGRAM=ninja
               -DCMAKE_C_COMPILER=${{ env.CC }}
               -DCMAKE_CXX_COMPILER=${{ env.CXX }}
-              -DCMAKE_C_FLAGS=\"${{ env.EXTRA_FLAGS }}\"
-              -DCMAKE_CXX_FLAGS=\"${{ env.EXTRA_FLAGS }} ${{ env.EXTRA_CXX_FLAGS }}\"
+              -DCMAKE_C_FLAGS=${{ env.EXTRA_FLAGS }}
+              -DCMAKE_CXX_FLAGS=${{ env.EXTRA_FLAGS }}
               -DCMAKE_BUILD_TYPE=${{ matrix.config.build_type }}
             RESULT_VARIABLE result
           )
