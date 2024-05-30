@@ -1,4 +1,4 @@
-name: build-and-test
+name: sanitize
 
 on: [push]
 
@@ -8,7 +8,7 @@ env:
 
 jobs:
   build:
-    name: ${{ matrix.os }}.${{ matrix.compiler }}.${{ matrix.build_type }}
+    name: ${{ matrix.sanitizer }}.${{ matrix.build_type }}
     runs-on: ubuntu-22.04
     strategy:
       fail-fast: false
