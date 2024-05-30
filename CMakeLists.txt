@@ -3,15 +3,12 @@ cmake_minimum_required(VERSION 3.24)
 project(turboq CXX)
 
 if (CMAKE_CURRENT_SOURCE_DIR STREQUAL CMAKE_SOURCE_DIR)
-  set(TurboQ_MasterProject ON)
+  set(TurboQMasterProject ON)
 else()
-  set(TurboQ_MasterProject OFF)
+  set(TurboQMasterProject OFF)
 endif()
 
-option(TurboQ_Sanitize "Enable sanitized targets" ${TurboQ_MasterProject})
-
 include(cmake/TurboQHelpers.cmake)
-include(cmake/Sanitize.cmake)
 
 if(NOT TARGET fmt::fmt)
   add_subdirectory(deps/fmt)

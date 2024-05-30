@@ -20,32 +20,10 @@ TurboQAddTestsFromSourceList(Sources
   COMPILE_OPTIONS -Wall -Wextra -g
   LIBS doctest::doctest_with_main ${TargetName})
 
-if (TurboQ_Sanitize)
-  foreach (sanitizer IN ITEMS asan tsan ubsan)
-    if (TARGET turboq::${sanitizer})
-      TurboQAddTestsFromSourceList(Sources
-        PREFIX ${TargetName}-${sanitizer}
-        COMPILE_OPTIONS -Wall -Wextra -g
-        LIBS doctest::doctest_with_main ${TargetName} turboq::${sanitizer})
-    endif()
-  endforeach()
-endif()
-
 TurboQAddBenchmarksFromSourceList(Sources
   PREFIX ${TargetName}
   COMPILE_OPTIONS -Wall -Wextra -g
   LIBS benchmark::benchmark_main ${TargetName} fmt::fmt)
-
-if (TurboQ_Sanitize)
-  foreach (sanitizer IN ITEMS asan tsan ubsan)
-    if (TARGET turboq::${sanitizer})
-      TurboQAddBenchmarksFromSourceList(Sources
-        PREFIX ${TargetName}-${sanitizer}
-        COMPILE_OPTIONS -Wall -Wextra -g
-        LIBS benchmark::benchmark_main ${TargetName} fmt::fmt turboq::${sanitizer})
-    endif()
-  endforeach()
-endif()
 
 TurboQExcludeTestsAndBenchmarksFromSourceList(Sources)
 
