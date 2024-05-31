@@ -1,5 +1,5 @@
 ![GitHub License](https://img.shields.io/github/license/ksergey/turboq)
-![GitHub Actions Workflow Status](https://img.shields.io/github/actions/workflow/status/ksergey/turboq/build.yml)
+![GitHub Actions Workflow Status](https://img.shields.io/github/actions/workflow/status/ksergey/turboq/build-and-test.yml)
 
 ## turboq: message queues for low latency inter-process communications
 
