@@ -8,7 +8,7 @@ env:
 
 jobs:
   build:
-    name: ${{ matrix.os }}.${{ matrix.compiler }}.${{ matrix.build_type }}
+    name: ${{ matrix.build_type }} build with ${{ matrix.compiler }} on ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -101,9 +101,6 @@ jobs:
       - name: configure
         shell: cmake -P {0}
         run: |
-          message(STATUS "CXX=$ENV{CXX}")
-          message(STATUS "CC=$ENV{CC}")
-
           set(ENV{PATH} "$ENV{GITHUB_WORKSPACE}:$ENV{PATH}")
 
           execute_process(
