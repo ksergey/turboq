@@ -9,5 +9,6 @@ SortIncludes: true
 AlwaysBreakTemplateDeclarations: true
 AllowShortFunctionsOnASingleLine: Empty
 AllowShortLambdasOnASingleLine: Empty
+AllowShortBlocksOnASingleLine: Empty
 AlignAfterOpenBracket: DontAlign
 ...
