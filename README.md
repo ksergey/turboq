@@ -1,4 +1,4 @@
-[<img src="https://img.shields.io/github/license/ksergey/turboq">](https://opensource.org/license/gpl-3-0)
+[<img src="https://img.shields.io/github/license/ksergey/turboq">](https://opensource.org/license/agpl-v3)
 [<img src="https://img.shields.io/github/actions/workflow/status/ksergey/turboq/build-and-test.yml?logo=linux">](https://github.com/ksergey/turboq/actions/workflows/build-and-test.yml)
 [<img src="https://img.shields.io/badge/language-C%2B%2B20-red">](https://en.wikipedia.org/wiki/C%2B%2B20)
 
