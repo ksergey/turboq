@@ -15,7 +15,7 @@
 #include <turboq/MappedRegion.h>
 #include <turboq/MemorySource.h>
 #include <turboq/detail/math.h>
-#include <turboq/detail/mmap.h>
+#include <turboq/detail/memory.h>
 #include <turboq/platform.h>
 
 namespace turboq {
@@ -42,6 +42,7 @@ struct BoundedSPSCRawQueueDetail {
 
     static_assert(std::atomic_ref<std::size_t>::is_always_lock_free);
   };
+  static_assert(std::is_trivially_copyable_v<MemoryHeader>);
 
   /// Control struct for message
   struct MessageHeader {
@@ -49,6 +50,7 @@ struct BoundedSPSCRawQueueDetail {
     std::size_t payloadOffset;
     std::size_t payloadSize;
   };
+  static_assert(std::is_trivially_copyable_v<MessageHeader>);
 
   /// Align message buffer size
   static constexpr std::size_t alignBufferSize(std::size_t value) noexcept {

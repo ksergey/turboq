@@ -1,7 +1,7 @@
 // Copyright (c) Sergey Kovalevich <inndie@gmail.com>
 // SPDX-License-Identifier: AGPL-3.0
 
-#include "mmap.h"
+#include "memory.h"
 
 #include <sys/mman.h>
 
