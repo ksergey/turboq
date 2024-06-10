@@ -18,7 +18,7 @@ jobs:
         compiler: [ 'gcc-12', 'gcc-13', 'clang-16', 'clang-17' ]
 
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
 
       - name: download ninja and cmake
         id: cmake_and_ninja
