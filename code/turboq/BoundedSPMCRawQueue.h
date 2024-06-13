@@ -337,7 +337,7 @@ public:
     }
 
     std::size_t pageSize;
-    std::tie(file_, pageSize) = std::move(result).assume_value();
+    std::tie(file_, pageSize) = std::move(result).value();
 
     if (auto storage = detail::mapFile(file_); !QueueDetail::check(storage.content())) {
       throw std::runtime_error("failed to open queue (invalid)");
@@ -353,7 +353,7 @@ public:
     }
 
     std::size_t pageSize;
-    std::tie(file_, pageSize) = std::move(result).assume_value();
+    std::tie(file_, pageSize) = std::move(result).value();
 
     // round-up requested size to page size
     std::size_t const capacity = detail::align_up(options.capacityHint, pageSize);

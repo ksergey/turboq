@@ -2,15 +2,22 @@ set(TargetName turboq)
 
 add_library(${TargetName})
 target_compile_features(${TargetName}
-  PUBLIC cxx_std_20)
+  PUBLIC cxx_std_23)
+set_target_properties(${TargetName}
+  PROPERTIES
+    CXX_STANDARD_REQUIRED ON
+    CXX_EXTENSIONS OFF)
 target_compile_options(${TargetName}
   PUBLIC -Wall -Wextra -Wattributes -Wpedantic -Wstrict-aliasing -Wcast-align -g)
-# target_compile_options(${TargetName}
-#   PRIVATE -fno-rtti)
 target_include_directories(${TargetName}
   PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
-target_link_libraries(${TargetName}
-  PUBLIC Boost::outcome Boost::scope_exit fmt::fmt)
+
+if (TurboQMasterProject)
+  target_compile_options(${TargetName}
+    PUBLIC -fsanitize=address,leak,undefined)
+  target_link_options(${TargetName}
+    PUBLIC -fsanitize=address,leak,undefined)
+endif()
 
 file(GLOB_RECURSE Sources "${CMAKE_CURRENT_SOURCE_DIR}/turboq/*.cpp")
 file(GLOB_RECURSE Headers "${CMAKE_CURRENT_SOURCE_DIR}/turboq/*.h")
@@ -23,7 +30,7 @@ TurboQAddTestsFromSourceList(Sources
 TurboQAddBenchmarksFromSourceList(Sources
   PREFIX ${TargetName}
   COMPILE_OPTIONS -Wall -Wextra -g
-  LIBS benchmark::benchmark_main ${TargetName} fmt::fmt)
+  LIBS benchmark::benchmark_main ${TargetName})
 
 TurboQExcludeTestsAndBenchmarksFromSourceList(Sources)
 

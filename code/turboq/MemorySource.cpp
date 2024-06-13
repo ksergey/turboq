@@ -9,17 +9,28 @@
 #include <algorithm>
 #include <array>
 #include <bit>
+#include <cassert>
 #include <charconv>
+#include <format>
+#include <print>
 #include <ranges>
 #include <regex>
 #include <string_view>
 #include <system_error>
 #include <vector>
 
-#include <boost/scope_exit.hpp>
-#include <fmt/format.h>
-
 namespace turboq {
+
+template <typename Fn>
+struct [[nodiscard]] AtScopeExit : Fn {
+  AtScopeExit(Fn&& fn) : Fn(std::forward<Fn>(fn)) {}
+  ~AtScopeExit() noexcept {
+    (*this)();
+  }
+};
+template <typename Fn>
+AtScopeExit(Fn&& fn) -> AtScopeExit<Fn>;
+
 namespace {
 
 std::size_t const gDefaultPageSize = ::sysconf(_SC_PAGESIZE);
@@ -39,12 +50,12 @@ Result<std::size_t> getDefaultHugePageSize() noexcept {
   char* line = nullptr;
   std::size_t len = 0;
 
-  BOOST_SCOPE_EXIT_ALL(&) {
+  auto atExit = AtScopeExit([&] {
     ::fclose(handle);
     if (line) {
       ::free(line);
     }
-  };
+  });
 
   std::cmatch match;
 
@@ -101,9 +112,9 @@ std::vector<MemoryMountPoint> readProcMounts() {
     throw std::system_error(ENOENT, getPosixErrorCategory(), "setmntent(...)");
   }
 
-  BOOST_SCOPE_EXIT_ALL(&) {
+  auto atExit = AtScopeExit([&] {
     ::endmntent(handle);
-  };
+  });
 
   std::vector<MemoryMountPoint> entries;
 
@@ -126,15 +137,15 @@ std::vector<MemoryMountPoint> readProcMounts() {
         if (defaultHugePageSize) {
           pageSize = defaultHugePageSize;
         } else {
-          fmt::print(stderr, "pagesize option error for mount point \"{}\" ({}): {}\n", mntent.mnt_dir,
-              mntent.mnt_fsname, pageSize.assume_error().message());
+          std::print(stderr, "turboq: pagesize option error for mount point \"{}\" ({}): {}\n", mntent.mnt_dir,
+              mntent.mnt_fsname, pageSize.error().message());
           continue;
         }
       }
 
       auto& entry = entries.emplace_back();
       entry.path = mntent.mnt_dir;
-      entry.pageSize = pageSize.assume_value();
+      entry.pageSize = pageSize.value();
       continue;
     }
   }
@@ -237,11 +248,11 @@ DefaultMemorySource::DefaultMemorySource(HugePagesOption hugePagesOpt) {
   }
 
   if (!result) {
-    throw std::system_error(result.assume_error());
+    throw std::system_error(result.error());
   }
 
-  path_ = result.assume_value().path;
-  pageSize_ = result.assume_value().pageSize;
+  path_ = result.value().path;
+  pageSize_ = result.value().pageSize;
 }
 
 DefaultMemorySource::DefaultMemorySource(std::filesystem::path const& path, std::size_t pageSize)
@@ -273,9 +284,9 @@ Result<std::tuple<File, std::size_t>> AnonymousMemorySource::open(
     std::string_view name, [[maybe_unused]] OpenFlags flags) const noexcept {
   auto result = File::anonymous(std::string(name).c_str());
   if (!result) {
-    return result.assume_error();
+    return makePosixErrorCode(result.error().value());
   }
-  return std::make_tuple(std::move(result).assume_value(), gDefaultPageSize);
+  return std::make_tuple(std::move(result).value(), gDefaultPageSize);
 }
 
 } // namespace turboq

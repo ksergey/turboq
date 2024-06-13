@@ -11,9 +11,8 @@
 #include <unistd.h>
 
 #include <cassert>
+#include <print>
 #include <system_error>
-
-#include <fmt/format.h>
 
 namespace turboq {
 namespace {
@@ -83,8 +82,8 @@ File::~File() noexcept {
   if (owns_) {
     auto const fd = fd_;
     if (auto const result = closeNoThrow(); !result) {
-      if (result.assume_error().value() == EBADF) {
-        fmt::print(stderr, FMT_STRING("closing fd {}, it may already have been closed"), fd);
+      if (result.error().value() == EBADF) {
+        std::print(stderr, "turboq: closing fd {}, it may already have been closed\n", fd);
       }
     }
   }
@@ -103,13 +102,13 @@ Result<> File::closeNoThrow() noexcept {
   if (rc != 0) {
     return makePosixErrorCode(errno);
   } else {
-    return success();
+    return {};
   }
 }
 
 void File::close() {
   if (auto const result = closeNoThrow(); !result) {
-    throw std::system_error(result.assume_error(), "close(...)");
+    throw std::system_error(result.error(), "close(...)");
   }
 }
 
@@ -184,7 +183,7 @@ Result<> File::tryTruncate(std::size_t size) const noexcept {
   if (::ftruncate(this->get(), size) == -1) {
     return makePosixErrorCode(errno);
   }
-  return success();
+  return {};
 }
 
 void File::truncate(std::size_t size) const {

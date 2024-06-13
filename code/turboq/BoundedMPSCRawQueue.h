@@ -8,11 +8,10 @@
 #include <bit>
 #include <cassert>
 #include <cstddef>
+#include <format>
 #include <span>
 #include <string_view>
 #include <type_traits>
-
-#include <fmt/format.h>
 
 #include <turboq/MappedRegion.h>
 #include <turboq/MemorySource.h>
@@ -167,7 +166,7 @@ public:
     std::size_t const totalSize = size + sizeof(MessageHeader);
     if (totalSize > header_->maxMessageSize) [[unlikely]] {
       throw std::runtime_error(
-          fmt::format("buffer exceed max message size ({} > {})", totalSize, header_->maxMessageSize));
+          std::format("buffer exceed max message size ({} > {})", totalSize, header_->maxMessageSize));
     }
 
     std::size_t currentProducerPos = std::atomic_ref(header_->producerPos).load(std::memory_order_acquire);
@@ -408,7 +407,7 @@ public:
     }
 
     std::size_t pageSize;
-    std::tie(file_, pageSize) = std::move(result).assume_value();
+    std::tie(file_, pageSize) = std::move(result).value();
 
     if (auto storage = detail::mapFile(file_); !QueueDetail::check(storage.content())) {
       throw std::runtime_error("failed to open queue (invalid)");
@@ -430,7 +429,7 @@ public:
     }
 
     std::size_t pageSize;
-    std::tie(file_, pageSize) = std::move(result).assume_value();
+    std::tie(file_, pageSize) = std::move(result).value();
 
     auto const maxMessageSize = QueueDetail::alignBufferSize(options.maxMessageSizeHint + sizeof(MessageHeader));
     auto const length = detail::upper_pow_2(options.lengthHint);

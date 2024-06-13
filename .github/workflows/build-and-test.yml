@@ -15,7 +15,7 @@ jobs:
       matrix:
         build_type: [ 'Debug', 'Release' ]
         os: [ 'ubuntu-22.04' ]
-        compiler: [ 'gcc-12', 'gcc-13', 'clang-16', 'clang-17' ]
+        compiler: [ 'gcc-14', 'clang-18' ]
 
     steps:
       - uses: actions/checkout@v4
@@ -50,53 +50,29 @@ jobs:
             COMMAND chmod +x ${cmake_dir}/cmake
           )
 
-      - name: install gcc-12
-        id: install_gcc_12
-        if: matrix.compiler == 'gcc-12'
-        shell: bash
-        working-directory: ${{ env.HOME }}
-        run: |
-          sudo add-apt-repository ppa:ubuntu-toolchain-r/ppa -y
-          sudo apt update
-          sudo apt install -y g++-12 gcc-12
-          echo "CC=gcc-12" >> $GITHUB_ENV
-          echo "CXX=g++-12" >> $GITHUB_ENV
-
-      - name: install gcc-13
-        id: install_gcc_13
-        if: matrix.compiler == 'gcc-13'
+      - name: install gcc-14
+        id: install_gcc_14
+        if: matrix.compiler == 'gcc-14'
         shell: bash
         working-directory: ${{ env.HOME }}
         run: |
           sudo add-apt-repository ppa:ubuntu-toolchain-r/test -y
           sudo apt update
-          sudo apt install -y g++-13 gcc-13
-          echo "CC=gcc-13" >> $GITHUB_ENV
-          echo "CXX=g++-13" >> $GITHUB_ENV
+          sudo apt install -y g++-14 gcc-14
+          echo "CC=gcc-14" >> $GITHUB_ENV
+          echo "CXX=g++-14" >> $GITHUB_ENV
 
-      - name: install clang-16
-        id: install_clang_16
-        if: matrix.compiler == 'clang-16'
+      - name: install clang-18
+        id: install_clang_18
+        if: matrix.compiler == 'clang-18'
         shell: bash
         working-directory: ${{ env.HOME }}
         run: |
           curl -O -L https://apt.llvm.org/llvm.sh
           chmod +x llvm.sh
-          sudo ./llvm.sh 16
-          echo "CC=clang-16" >> $GITHUB_ENV
-          echo "CXX=clang++-16" >> $GITHUB_ENV
-
-      - name: install clang-17
-        id: install_clang_17
-        if: matrix.compiler == 'clang-17'
-        shell: bash
-        working-directory: ${{ env.HOME }}
-        run: |
-          curl -O -L https://apt.llvm.org/llvm.sh
-          chmod +x llvm.sh
-          sudo ./llvm.sh 17
-          echo "CC=clang-17" >> $GITHUB_ENV
-          echo "CXX=clang++-17" >> $GITHUB_ENV
+          sudo ./llvm.sh 18
+          echo "CC=clang-18" >> $GITHUB_ENV
+          echo "CXX=clang++-18" >> $GITHUB_ENV
 
       - name: configure
         shell: cmake -P {0}

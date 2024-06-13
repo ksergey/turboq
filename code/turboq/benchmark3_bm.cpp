@@ -1,14 +1,15 @@
 #include <atomic>
 #include <barrier>
 #include <cassert>
+#include <cmath>
 #include <cstdint>
+#include <format>
 #include <numeric>
+#include <print>
 #include <thread>
 #include <vector>
 
 #include <benchmark/benchmark.h>
-
-#include <fmt/format.h>
 
 #include "BoundedMPSCRawQueue.h"
 #include "BoundedSPMCRawQueue.h"
@@ -58,10 +59,8 @@ static void BM_EnqueueDequeue_NoThreads(::benchmark::State& state) {
   std::uint64_t value = 0;
 
   for (auto _ : state) {
-    while (!enqueue(producer, counter++)) {
-    }
-    while (!dequeue(consumer, value)) {
-    }
+    while (!enqueue(producer, counter++)) {}
+    while (!dequeue(consumer, value)) {}
     assert(value == (counter - 1));
     benchmark::DoNotOptimize(value);
   }
@@ -118,7 +117,7 @@ inline void bindCurrentThreadToCore(int coreNo) noexcept {
 
   auto const rc = ::pthread_setaffinity_np(pthread_self(), sizeof(cpu_set_t), &cpuset);
   if (rc != 0) {
-    fmt::print(stderr, "failed to bind current thread to core: {}\n", ::strerror(rc));
+    std::print(stderr, "failed to bind current thread to core: {}\n", ::strerror(rc));
   }
 }
 
@@ -214,7 +213,7 @@ static void BM_EnqueueDequeue(::benchmark::State& state) {
       std::uint64_t const expected = (Ops) * (Ops - 1) / 2;
       std::uint64_t const actual = sum.load();
       if (expected != actual) {
-        state.SkipWithError(fmt::format("Expected sum {}, got {}", expected, actual));
+        state.SkipWithError(std::format("Expected sum {}, got {}", expected, actual));
       }
     };
     return runOnce<ProducersCount, ConsumersCount, BindToCoreT>(produceFn, consumeFn, endFn);
