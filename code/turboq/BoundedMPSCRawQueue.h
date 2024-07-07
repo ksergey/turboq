@@ -8,10 +8,11 @@
 #include <bit>
 #include <cassert>
 #include <cstddef>
-#include <format>
 #include <span>
 #include <string_view>
 #include <type_traits>
+
+#include <fmt/format.h>
 
 #include <turboq/MappedRegion.h>
 #include <turboq/MemorySource.h>

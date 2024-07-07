@@ -11,8 +11,9 @@
 #include <unistd.h>
 
 #include <cassert>
-#include <print>
 #include <system_error>
+
+#include <fmt/format.h>
 
 namespace turboq {
 namespace {
@@ -83,7 +84,7 @@ File::~File() noexcept {
     auto const fd = fd_;
     if (auto const result = closeNoThrow(); !result) {
       if (result.error().value() == EBADF) {
-        std::print(stderr, "turboq: closing fd {}, it may already have been closed\n", fd);
+        fmt::print(stderr, "turboq: closing fd {}, it may already have been closed\n", fd);
       }
     }
   }

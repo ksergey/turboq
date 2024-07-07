@@ -11,13 +11,13 @@
 #include <bit>
 #include <cassert>
 #include <charconv>
-#include <format>
-#include <print>
 #include <ranges>
 #include <regex>
 #include <string_view>
 #include <system_error>
 #include <vector>
+
+#include <fmt/format.h>
 
 namespace turboq {
 
@@ -137,7 +137,7 @@ std::vector<MemoryMountPoint> readProcMounts() {
         if (defaultHugePageSize) {
           pageSize = defaultHugePageSize;
         } else {
-          std::print(stderr, "turboq: pagesize option error for mount point \"{}\" ({}): {}\n", mntent.mnt_dir,
+          fmt::print(stderr, "turboq: pagesize option error for mount point \"{}\" ({}): {}\n", mntent.mnt_dir,
               mntent.mnt_fsname, pageSize.error().message());
           continue;
         }
