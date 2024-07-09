@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0
 
 #include <stdexcept>
+#include <system_error>
 #include <type_traits>
 #include <variant>
 
@@ -17,7 +18,9 @@ template <typename E>
 class Unexpected {
 public:
   constexpr Unexpected(Unexpected const&) = default;
+  constexpr Unexpected& operator=(Unexpected const&) = default;
   constexpr Unexpected(Unexpected&&) = default;
+  constexpr Unexpected& operator=(Unexpected&&) = default;
 
   constexpr explicit Unexpected(E const& rhs) : storage_(rhs) {}
   constexpr explicit Unexpected(E&& rhs) : storage_(std::move(rhs)) {}
@@ -28,6 +31,9 @@ public:
   constexpr E&& error() && noexcept {
     return std::move(storage_);
   }
+
+  friend constexpr bool operator==(Unexpected const&, Unexpected const&) = default;
+  friend constexpr auto operator<=>(Unexpected const&, Unexpected const&) = default;
 
 private:
   E storage_;
@@ -49,7 +55,40 @@ public:
   constexpr Expected(Args&&... args) : storage_(std::forward<Args>(args)...) {}
 
   constexpr Expected(Expected const&) = default;
+  constexpr Expected& operator=(Expected const&) = default;
   constexpr Expected(Expected&&) = default;
+  constexpr Expected& operator=(Expected&&) = default;
+
+  constexpr Expected& operator=(T&& value) {
+    storage_.template emplace<0>(std::move(value));
+    return *this;
+  }
+
+  constexpr Expected& operator=(T const& value) {
+    storage_.template emplace<0>(value);
+    return *this;
+  }
+
+  constexpr Expected& operator=(Unexpected<E>&& value) {
+    storage_.template emplace<1>(std::move(value));
+    return *this;
+  }
+
+  constexpr Expected& operator=(Unexpected<E> const& value) {
+    storage_.template emplace<1>(value);
+    return *this;
+  }
+
+  template <typename U = T, typename G = E>
+    requires(!std::is_same_v<Expected<U, G>, Expected> && std::is_convertible_v<U, T> && std::is_convertible_v<G, E>)
+  constexpr Expected& operator=(Expected<U, G> value) {
+    if (value.has_value()) {
+      storage_.template emplace<0>(std::move(static_cast<Expected<U, G>&&>(value).value()));
+    } else {
+      storage_.template emplace<1>(std::move(static_cast<Expected<U, G>&&>(value).error()));
+    }
+    return *this;
+  }
 
   constexpr bool has_value() const noexcept {
     return storage_.index() == 0;
@@ -106,7 +145,20 @@ public:
   constexpr Expected(Args&&... args) : storage_(std::forward<Args>(args)...) {}
 
   constexpr Expected(Expected const&) = default;
+  constexpr Expected& operator=(Expected const&) = default;
   constexpr Expected(Expected&&) = default;
+  constexpr Expected& operator=(Expected&&) = default;
+
+  template <typename G = E>
+    requires std::is_convertible_v<G, E>
+  constexpr Expected& operator=(Expected<void, G> value) {
+    if (!value.has_value()) {
+      storage_.template emplace<1>(std::move(static_cast<Expected<void, G>&&>(value).error()));
+    } else {
+      storage_.template emplace<0>();
+    }
+    return *this;
+  }
 
   constexpr bool has_value() const noexcept {
     return storage_.index() == 0;
@@ -122,6 +174,16 @@ public:
 
   constexpr E error() && noexcept {
     return std::move(*std::get_if<Unexpected<E>>(&storage_)).error();
+  }
+
+  constexpr Expected& operator=(Unexpected<E>&& value) {
+    storage_.template emplace<1>(std::move(value));
+    return *this;
+  }
+
+  constexpr Expected& operator=(Unexpected<E> const& value) {
+    storage_.template emplace<1>(value);
+    return *this;
   }
 };
 

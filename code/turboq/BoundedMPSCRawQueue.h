@@ -167,7 +167,7 @@ public:
     std::size_t const totalSize = size + sizeof(MessageHeader);
     if (totalSize > header_->maxMessageSize) [[unlikely]] {
       throw std::runtime_error(
-          std::format("buffer exceed max message size ({} > {})", totalSize, header_->maxMessageSize));
+          fmt::format("buffer exceed max message size ({} > {})", totalSize, header_->maxMessageSize));
     }
 
     std::size_t currentProducerPos = std::atomic_ref(header_->producerPos).load(std::memory_order_acquire);
