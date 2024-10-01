@@ -2,7 +2,7 @@ set(TargetName turboq)
 
 add_library(${TargetName})
 target_compile_features(${TargetName}
-  PUBLIC cxx_std_23)
+  PUBLIC cxx_std_20)
 set_target_properties(${TargetName}
   PROPERTIES
     CXX_STANDARD_REQUIRED ON
@@ -11,6 +11,8 @@ target_compile_options(${TargetName}
   PUBLIC -Wall -Wextra -Wattributes -Wpedantic -Wstrict-aliasing -Wcast-align -g)
 target_include_directories(${TargetName}
   PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+target_link_libraries(${TargetName}
+  PUBLIC fmt::fmt Boost::outcome Boost::scope_exit)
 
 if (TurboQMasterProject)
   target_compile_options(${TargetName}

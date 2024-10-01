@@ -11,40 +11,40 @@
 
 namespace turboq {
 
-template <typename Producer, typename Data>
-  requires TurboQProducer<Producer> and std::is_trivially_copyable_v<Data>
-TURBOQ_FORCE_INLINE bool enqueue(Producer& producer, Data const& data) {
+template <typename ProducerT, typename DataT>
+  requires Producer<ProducerT> and std::is_trivially_copyable_v<DataT>
+TURBOQ_FORCE_INLINE bool enqueue(ProducerT& producer, DataT const& data) {
   auto buffer = producer.prepare(sizeof(data));
   if (buffer.empty()) {
     return false;
   }
 
-  *std::bit_cast<Data*>(buffer.data()) = data;
+  *std::bit_cast<DataT*>(buffer.data()) = data;
   producer.commit();
 
   return true;
 }
 
-template <typename Consumer, typename Data>
-  requires TurboQConsumer<Consumer> and std::is_trivially_copyable_v<Data>
-TURBOQ_FORCE_INLINE bool dequeue(Consumer& consumer, Data& data) {
+template <typename ConsumerT, typename DataT>
+  requires Consumer<ConsumerT> and std::is_trivially_copyable_v<DataT>
+TURBOQ_FORCE_INLINE bool dequeue(ConsumerT& consumer, DataT& data) {
   auto buffer = consumer.fetch();
   if (buffer.empty()) {
     return false;
   }
-  data = *std::bit_cast<Data const*>(buffer.data());
+  data = *std::bit_cast<DataT const*>(buffer.data());
   consumer.consume();
   return true;
 }
 
-template <typename Consumer, typename Data>
-  requires TurboQConsumer<Consumer> and std::is_trivially_copyable_v<Data>
-TURBOQ_FORCE_INLINE bool fetch(Consumer& consumer, Data& data) {
+template <typename ConsumerT, typename DataT>
+  requires Consumer<ConsumerT> and std::is_trivially_copyable_v<DataT>
+TURBOQ_FORCE_INLINE bool fetch(ConsumerT& consumer, DataT& data) {
   auto buffer = consumer.fetch();
   if (buffer.empty()) {
     return false;
   }
-  data = *std::bit_cast<Data const*>(buffer.data());
+  data = *std::bit_cast<DataT const*>(buffer.data());
   return true;
 }
 

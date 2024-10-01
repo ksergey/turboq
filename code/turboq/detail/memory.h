@@ -8,7 +8,10 @@
 
 namespace turboq::detail {
 
+/// Map file to memory
 MappedRegion mapFile(File const& file, std::size_t fileSize);
+
+/// \overload
 MappedRegion mapFile(File const& file);
 
 } // namespace turboq::detail

@@ -11,26 +11,16 @@
 #include <bit>
 #include <cassert>
 #include <charconv>
-#include <format>
-#include <print>
 #include <ranges>
 #include <regex>
 #include <string_view>
 #include <system_error>
 #include <vector>
 
+#include <boost/scope_exit.hpp>
+#include <fmt/format.h>
+
 namespace turboq {
-
-template <typename Fn>
-struct [[nodiscard]] AtScopeExit : Fn {
-  AtScopeExit(Fn&& fn) : Fn(std::forward<Fn>(fn)) {}
-  ~AtScopeExit() noexcept {
-    (*this)();
-  }
-};
-template <typename Fn>
-AtScopeExit(Fn&& fn) -> AtScopeExit<Fn>;
-
 namespace {
 
 std::size_t const gDefaultPageSize = ::sysconf(_SC_PAGESIZE);
@@ -50,12 +40,12 @@ Result<std::size_t> getDefaultHugePageSize() noexcept {
   char* line = nullptr;
   std::size_t len = 0;
 
-  auto atExit = AtScopeExit([&] {
+  BOOST_SCOPE_EXIT_ALL(&) {
     ::fclose(handle);
     if (line) {
       ::free(line);
     }
-  });
+  };
 
   std::cmatch match;
 
@@ -112,9 +102,9 @@ std::vector<MemoryMountPoint> readProcMounts() {
     throw std::system_error(ENOENT, getPosixErrorCategory(), "setmntent(...)");
   }
 
-  auto atExit = AtScopeExit([&] {
+  BOOST_SCOPE_EXIT_ALL(&) {
     ::endmntent(handle);
-  });
+  };
 
   std::vector<MemoryMountPoint> entries;
 
@@ -137,7 +127,7 @@ std::vector<MemoryMountPoint> readProcMounts() {
         if (defaultHugePageSize) {
           pageSize = defaultHugePageSize;
         } else {
-          std::print(stderr, "turboq: pagesize option error for mount point \"{}\" ({}): {}\n", mntent.mnt_dir,
+          fmt::print(stderr, "turboq: pagesize option error for mount point \"{}\" ({}): {}\n", mntent.mnt_dir,
               mntent.mnt_fsname, pageSize.error().message());
           continue;
         }

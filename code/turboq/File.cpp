@@ -10,9 +10,18 @@
 #include <sys/types.h>
 #include <unistd.h>
 
+#include <fmt/format.h>
+
 #include <cassert>
-#include <print>
 #include <system_error>
+
+#ifndef MFD_CLOEXEC
+int memfd_create(const char* name, unsigned int flags) {
+  // Shouldn't work on linux before 3.17
+  return syscall(__NR_memfd_create, name, flags);
+}
+#define MFD_CLOEXEC FD_CLOEXEC
+#endif
 
 namespace turboq {
 namespace {
@@ -83,7 +92,7 @@ File::~File() noexcept {
     auto const fd = fd_;
     if (auto const result = closeNoThrow(); !result) {
       if (result.error().value() == EBADF) {
-        std::print(stderr, "turboq: closing fd {}, it may already have been closed\n", fd);
+        fmt::print(stderr, "turboq: closing fd {}, it may already have been closed\n", fd);
       }
     }
   }
@@ -102,7 +111,7 @@ Result<> File::closeNoThrow() noexcept {
   if (rc != 0) {
     return makePosixErrorCode(errno);
   } else {
-    return {};
+    return success();
   }
 }
 
@@ -183,7 +192,7 @@ Result<> File::tryTruncate(std::size_t size) const noexcept {
   if (::ftruncate(this->get(), size) == -1) {
     return makePosixErrorCode(errno);
   }
-  return {};
+  return success();
 }
 
 void File::truncate(std::size_t size) const {

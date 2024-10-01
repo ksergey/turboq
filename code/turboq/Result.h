@@ -8,19 +8,9 @@
 #include <exception>
 #include <system_error>
 
-#include <turboq/platform.h>
+#include <boost/outcome.hpp>
 
-#if __cpp_concepts >= 202002L
-#include <expected>
-#elif __clang_major__ >= 17
-#define turboq_save__cpp_concepts
-#pragma clang diagnostic ignored "-Wbuiltin-macro-redefined"
-#define __cpp_concepts 202002L
-#include <expected>
-#pragma clang diagnostic ignored "-Wmacro-redefined"
-#define __cpp_concepts turboq_save__cpp_concepts
-#undef turboq_save__cpp_concepts
-#endif
+#include <turboq/platform.h>
 
 namespace turboq {
 
@@ -45,13 +35,20 @@ TURBOQ_FORCE_INLINE std::error_category const& getPosixErrorCategory() noexcept 
   return errorCategory;
 }
 
-/// Optional with failure reason.
+/// @see boost::outcome
+/// mimic: std::expected from c++23
 template <class T = void, class E = std::error_code>
-using Result = std::expected<T, E>;
+using Result = BOOST_OUTCOME_V2_NAMESPACE::std_result<T, E>;
+
+/// @see boost::outcome
+using BOOST_OUTCOME_V2_NAMESPACE::success;
+
+/// @see boost::outcome
+using BOOST_OUTCOME_V2_NAMESPACE::failure;
 
 /// Return ErrorCode with posix error
-TURBOQ_FORCE_INLINE std::unexpected<std::error_code> makePosixErrorCode(int ec) noexcept {
-  return std::unexpected<std::error_code>(std::error_code(ec, getPosixErrorCategory()));
+TURBOQ_FORCE_INLINE decltype(auto) makePosixErrorCode(int ec) noexcept {
+  return failure(std::error_code(ec, getPosixErrorCategory()));
 }
 
 } // namespace turboq
