@@ -2,11 +2,8 @@ cmake_minimum_required(VERSION 3.24)
 
 project(turboq CXX)
 
-if (CMAKE_CURRENT_SOURCE_DIR STREQUAL CMAKE_SOURCE_DIR)
-  set(TurboQMasterProject ON)
-else()
-  set(TurboQMasterProject OFF)
-endif()
+option(TURBOQ_PYTHON "Build python binding" ON)
+option(TURBOQ_SANITIZER "Build with sanitizer" OFF)
 
 include(cmake/TurboQHelpers.cmake)
 
@@ -33,3 +30,11 @@ enable_testing()
 
 add_subdirectory(code)
 add_subdirectory(examples)
+
+if(TURBOQ_PYTHON)
+  if(NOT COMMAND nanobind_add_module)
+    add_subdirectory(deps/nanobind)
+  endif()
+
+  add_subdirectory(python)
+endif()

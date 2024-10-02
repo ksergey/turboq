@@ -14,7 +14,7 @@ target_include_directories(${TargetName}
 target_link_libraries(${TargetName}
   PUBLIC fmt::fmt Boost::outcome Boost::scope_exit)
 
-if (TurboQMasterProject)
+if (TURBOQ_SANITIZER)
   target_compile_options(${TargetName}
     PUBLIC -fsanitize=address,leak,undefined)
   target_link_options(${TargetName}
