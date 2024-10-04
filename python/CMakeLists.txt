@@ -8,3 +8,5 @@ nanobind_add_module(${TargetName}
 
 target_link_libraries(${TargetName}
   PRIVATE turboq::turboq)
+
+file(COPY dump.py DESTINATION ${CMAKE_CURRENT_BINARY_DIR})

@@ -12,7 +12,12 @@ target_compile_options(${TargetName}
 target_include_directories(${TargetName}
   PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(${TargetName}
-  PUBLIC fmt::fmt Boost::outcome Boost::scope_exit)
+  PUBLIC fmt::fmt-header-only Boost::outcome Boost::scope_exit)
+
+if (TURBOQ_PYTHON)
+  set_property(TARGET ${TargetName}
+    PROPERTY POSITION_INDEPENDENT_CODE ON)
+endif()
 
 if (TURBOQ_SANITIZER)
   target_compile_options(${TargetName}
