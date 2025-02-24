@@ -17,8 +17,9 @@
 #include <system_error>
 #include <vector>
 
-#include <boost/scope_exit.hpp>
 #include <fmt/format.h>
+
+#include "ScopeGuard.h"
 
 namespace turboq {
 namespace {
@@ -40,12 +41,12 @@ Result<std::size_t> getDefaultHugePageSize() noexcept {
   char* line = nullptr;
   std::size_t len = 0;
 
-  BOOST_SCOPE_EXIT_ALL(&) {
+  ScopeGuard guard([&]() noexcept {
     ::fclose(handle);
     if (line) {
       ::free(line);
     }
-  };
+  });
 
   std::cmatch match;
 
@@ -102,9 +103,9 @@ std::vector<MemoryMountPoint> readProcMounts() {
     throw std::system_error(ENOENT, getPosixErrorCategory(), "setmntent(...)");
   }
 
-  BOOST_SCOPE_EXIT_ALL(&) {
+  ScopeGuard guard([&]() noexcept {
     ::endmntent(handle);
-  };
+  });
 
   std::vector<MemoryMountPoint> entries;
 
