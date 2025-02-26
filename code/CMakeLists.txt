@@ -2,7 +2,7 @@ set(TargetName turboq)
 
 add_library(${TargetName})
 target_compile_features(${TargetName}
-  PUBLIC cxx_std_20)
+  PUBLIC cxx_std_23)
 set_target_properties(${TargetName}
   PROPERTIES
     CXX_STANDARD_REQUIRED ON
@@ -12,7 +12,7 @@ target_compile_options(${TargetName}
 target_include_directories(${TargetName}
   PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(${TargetName}
-  PUBLIC fmt::fmt-header-only Boost::outcome)
+  PUBLIC fmt::fmt-header-only)
 
 if (TURBOQ_PYTHON)
   set_property(TARGET ${TargetName}
