@@ -6,9 +6,8 @@
 #include <cerrno>
 #include <cstring>
 #include <exception>
+#include <expected>
 #include <system_error>
-
-#include <boost/outcome.hpp>
 
 #include <turboq/platform.h>
 
@@ -38,17 +37,16 @@ TURBOQ_FORCE_INLINE std::error_category const& getPosixErrorCategory() noexcept 
 /// @see boost::outcome
 /// mimic: std::expected from c++23
 template <class T = void, class E = std::error_code>
-using Result = BOOST_OUTCOME_V2_NAMESPACE::std_result<T, E>;
+using Result = std::expected<T, E>;
 
 /// @see boost::outcome
-using BOOST_OUTCOME_V2_NAMESPACE::success;
-
-/// @see boost::outcome
-using BOOST_OUTCOME_V2_NAMESPACE::failure;
+constexpr Result<> success() noexcept {
+  return {};
+}
 
 /// Return ErrorCode with posix error
 TURBOQ_FORCE_INLINE decltype(auto) makePosixErrorCode(int ec) noexcept {
-  return failure(std::error_code(ec, getPosixErrorCategory()));
+  return std::unexpected(std::error_code(ec, getPosixErrorCategory()));
 }
 
 } // namespace turboq
