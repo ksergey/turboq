@@ -13,7 +13,7 @@
 
 ## Requirements
 
-- C++20 (gcc-14+, clang-19+)
+- C++23 (gcc-14, clang-19)
 - benchmark, doctest, fmt
 
 <!--
