@@ -15,7 +15,7 @@ jobs:
       matrix:
         build_type: [ 'Debug', 'Release' ]
         os: [ 'ubuntu-24.04' ]
-        compiler: [ 'gcc-14', 'clang-18' ]
+        compiler: [ 'gcc-14', 'clang-19' ]
 
     steps:
       - uses: actions/checkout@v4
@@ -62,17 +62,17 @@ jobs:
           echo "CC=gcc-14" >> $GITHUB_ENV
           echo "CXX=g++-14" >> $GITHUB_ENV
 
-      - name: install clang-18
-        id: install_clang_18
-        if: matrix.compiler == 'clang-18'
+      - name: install clang-19
+        id: install_clang_19
+        if: matrix.compiler == 'clang-19'
         shell: bash
         working-directory: ${{ env.HOME }}
         run: |
           curl -O -L https://apt.llvm.org/llvm.sh
           chmod +x llvm.sh
           sudo ./llvm.sh 18
-          echo "CC=clang-18" >> $GITHUB_ENV
-          echo "CXX=clang++-18" >> $GITHUB_ENV
+          echo "CC=clang-19" >> $GITHUB_ENV
+          echo "CXX=clang++-19" >> $GITHUB_ENV
 
       - name: configure
         shell: cmake -P {0}
