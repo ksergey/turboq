@@ -7,7 +7,6 @@
 #include <span>
 
 #include <turboq/File.h>
-#include <turboq/platform.h>
 
 namespace turboq {
 
@@ -42,32 +41,32 @@ public:
   virtual ~MappedRegion() noexcept;
 
   /// Return true if initialized.
-  [[nodiscard]] TURBOQ_FORCE_INLINE explicit operator bool() const noexcept {
+  [[nodiscard]] explicit operator bool() const noexcept {
     return size_ > 0;
   }
 
   /// Return pointer to data.
-  [[nodiscard]] TURBOQ_FORCE_INLINE std::byte const* data() const noexcept {
+  [[nodiscard]] auto data() const noexcept -> std::byte const* {
     return data_;
   }
 
   /// \overload
-  [[nodiscard]] TURBOQ_FORCE_INLINE std::byte* data() noexcept {
+  [[nodiscard]] auto data() noexcept -> std::byte* {
     return data_;
   }
 
   /// Return size of data.
-  [[nodiscard]] TURBOQ_FORCE_INLINE std::size_t size() const noexcept {
+  [[nodiscard]] auto size() const noexcept -> std::size_t {
     return size_;
   }
 
   /// Return mapped region content
-  [[nodiscard]] TURBOQ_FORCE_INLINE std::span<std::byte const> content() const noexcept {
+  [[nodiscard]] auto content() const noexcept -> std::span<std::byte const> {
     return {data_, size_};
   }
 
   /// \overload
-  [[nodiscard]] TURBOQ_FORCE_INLINE std::span<std::byte> content() noexcept {
+  [[nodiscard]] auto content() noexcept -> std::span<std::byte> {
     return {data_, size_};
   }
 

@@ -13,11 +13,11 @@
 #include <string_view>
 #include <type_traits>
 
-#include <turboq/MappedRegion.h>
-#include <turboq/MemorySource.h>
-#include <turboq/detail/math.h>
-#include <turboq/detail/memory.h>
-#include <turboq/platform.h>
+#include "MappedRegion.h"
+#include "MemorySource.h"
+#include "detail/math.h"
+#include "detail/memory.h"
+#include "platform.h"
 
 namespace turboq {
 namespace detail {
@@ -178,8 +178,8 @@ public:
     }
 
     while (!std::atomic_ref(header_->producerPos)
-                .compare_exchange_weak(currentProducerPos, currentProducerPos + 1, std::memory_order_release,
-                    std::memory_order_relaxed)) [[unlikely]] {
+            .compare_exchange_weak(currentProducerPos, currentProducerPos + 1, std::memory_order_release,
+                std::memory_order_relaxed)) [[unlikely]] {
       if (currentProducerPos - consumerPosCache_ >= header_->length) [[unlikely]] {
         return {};
       }

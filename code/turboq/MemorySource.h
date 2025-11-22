@@ -20,8 +20,8 @@ struct MemorySource {
 
   /// Get file descriptor for mapping and page size to roundup
   /// \param[in] name is memory source name
-  [[nodiscard]] virtual Result<std::tuple<File, std::size_t>> open(
-      [[maybe_unused]] std::string_view name, [[maybe_unused]] OpenFlags flags) const noexcept {
+  [[nodiscard]] virtual auto open([[maybe_unused]] std::string_view name,
+      [[maybe_unused]] OpenFlags flags) const noexcept -> Result<std::tuple<File, std::size_t>> {
     return makePosixErrorCode(ENOSYS);
   }
 };
@@ -46,15 +46,15 @@ public:
   DefaultMemorySource(std::filesystem::path const& path, std::size_t pageSize);
 
   /// \see MemorySource::open
-  [[nodiscard]] Result<std::tuple<File, std::size_t>> open(
-      std::string_view name, OpenFlags flags) const noexcept override;
+  [[nodiscard]] auto open(std::string_view name, OpenFlags flags) const noexcept
+      -> Result<std::tuple<File, std::size_t>> override;
 };
 
 /// Anonymous memory source
 struct AnonymousMemorySource final : public MemorySource {
   /// \see MemorySource::open
-  [[nodiscard]] Result<std::tuple<File, std::size_t>> open(
-      std::string_view name, OpenFlags flags) const noexcept override;
+  [[nodiscard]] auto open(std::string_view name, OpenFlags flags) const noexcept
+      -> Result<std::tuple<File, std::size_t>> override;
 };
 
 } // namespace turboq

@@ -15,7 +15,7 @@
 #include <system_error>
 
 #ifndef MFD_CLOEXEC
-int memfd_create(const char* name, unsigned int flags) {
+auto memfd_create(const char* name, unsigned int flags) -> int {
   // Shouldn't work on linux before 3.17
   return syscall(__NR_memfd_create, name, flags);
 }
@@ -25,7 +25,7 @@ int memfd_create(const char* name, unsigned int flags) {
 namespace turboq {
 namespace {
 
-constexpr int makeOpenFlags(OpenMode openMode) noexcept {
+constexpr auto makeOpenFlags(OpenMode openMode) noexcept -> int {
   int flags = 0;
   if (openMode == OpenMode::ReadOnly) {
     flags = O_RDONLY;
@@ -35,7 +35,7 @@ constexpr int makeOpenFlags(OpenMode openMode) noexcept {
   return flags;
 }
 
-TURBOQ_FORCE_INLINE int flockNoInt(int fd, int op) noexcept {
+auto flockNoInt(int fd, int op) noexcept -> int {
   int rc;
   do {
     rc = ::flock(fd, op);
@@ -50,7 +50,6 @@ File::File(OpenOnly, std::filesystem::path const& path, OpenMode openMode) {
   if (fd == -1) {
     throw std::system_error(errno, getPosixErrorCategory(), "open(...)");
   }
-
   this->reset(fd, true);
 }
 
@@ -60,7 +59,6 @@ File::File(CreateOnly, std::filesystem::path const& path, OpenMode openMode, mod
     throw std::system_error(errno, getPosixErrorCategory(), "open(...)");
   }
   ::fchmod(fd, mode);
-
   this->reset(fd, true);
 }
 
@@ -82,7 +80,6 @@ File::File(OpenOrCreate, std::filesystem::path const& path, OpenMode openMode, m
   if (fd == -1) {
     throw std::system_error(errno, getPosixErrorCategory(), "open(...)");
   }
-
   this->reset(fd, true);
 }
 
@@ -97,14 +94,14 @@ File::~File() noexcept {
   }
 }
 
-int File::release() noexcept {
+auto File::release() noexcept -> int {
   int released = fd_;
   fd_ = kInvalidFd;
   owns_ = false;
   return released;
 }
 
-Result<> File::closeNoThrow() noexcept {
+auto File::closeNoThrow() noexcept -> Result<> {
   int const rc = owns_ ? ::close(fd_) : 0;
   release();
   if (rc != 0) {
@@ -120,7 +117,7 @@ void File::close() {
   }
 }
 
-Result<File> File::dup() const noexcept {
+auto File::dup() const noexcept -> Result<File> {
   if (valid()) {
     int fd = ::dup(get());
     if (fd == -1) {
@@ -132,7 +129,7 @@ Result<File> File::dup() const noexcept {
   }
 }
 
-Result<File> File::temporary(std::filesystem::path const& path) noexcept {
+auto File::temporary(std::filesystem::path const& path) noexcept -> Result<File> {
   int fd = ::open(path.c_str(), O_TMPFILE | O_CLOEXEC | O_RDWR, 0666);
   if (fd == -1) {
     return makePosixErrorCode(errno);
@@ -140,7 +137,7 @@ Result<File> File::temporary(std::filesystem::path const& path) noexcept {
   return File(fd, true);
 }
 
-Result<File> File::anonymous(char const* name) noexcept {
+auto File::anonymous(char const* name) noexcept -> Result<File> {
   int fd = ::memfd_create(name, MFD_CLOEXEC);
   if (fd == -1) {
     return makePosixErrorCode(errno);
@@ -152,7 +149,7 @@ void File::lock() {
   doLock(LOCK_EX);
 }
 
-bool File::tryLock() {
+auto File::tryLock() -> bool {
   return doTryLock(LOCK_EX);
 }
 
@@ -160,7 +157,7 @@ void File::lockShared() {
   doLock(LOCK_SH);
 }
 
-bool File::tryLockShared() {
+auto File::tryLockShared() -> bool {
   return doTryLock(LOCK_SH);
 }
 
@@ -171,7 +168,7 @@ void File::unlock() {
   }
 }
 
-Result<std::size_t> File::tryGetFileSize() const noexcept {
+auto File::tryGetFileSize() const noexcept -> Result<std::size_t> {
   struct stat st;
   if (::fstat(this->get(), &st) == -1) {
     return makePosixErrorCode(errno);
@@ -179,7 +176,7 @@ Result<std::size_t> File::tryGetFileSize() const noexcept {
   return std::size_t(st.st_size);
 }
 
-std::size_t File::getFileSize() const {
+auto File::getFileSize() const -> std::size_t {
   struct stat st;
   if (::fstat(this->get(), &st) == -1) {
     throw std::system_error(errno, getPosixErrorCategory(), "fstat(...)");
@@ -187,7 +184,7 @@ std::size_t File::getFileSize() const {
   return st.st_size;
 }
 
-Result<> File::tryTruncate(std::size_t size) const noexcept {
+auto File::tryTruncate(std::size_t size) const noexcept -> Result<> {
   if (::ftruncate(this->get(), size) == -1) {
     return makePosixErrorCode(errno);
   }
@@ -200,14 +197,14 @@ void File::truncate(std::size_t size) const {
   }
 }
 
-TURBOQ_FORCE_INLINE void File::doLock(int op) {
+void File::doLock(int op) {
   int rc = flockNoInt(get(), op | LOCK_NB);
   if (rc == -1) {
     throw std::system_error(errno, getPosixErrorCategory(), "flock(...)");
   }
 }
 
-TURBOQ_FORCE_INLINE bool File::doTryLock(int op) {
+auto File::doTryLock(int op) -> bool {
   int rc = flockNoInt(get(), op | LOCK_NB);
   if (rc == -1) {
     if (errno != EWOULDBLOCK) {

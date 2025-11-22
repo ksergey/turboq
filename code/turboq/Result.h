@@ -9,8 +9,6 @@
 #include <expected>
 #include <system_error>
 
-#include <turboq/platform.h>
-
 namespace turboq {
 
 /// Error category for posix errors
@@ -18,18 +16,18 @@ struct PosixErrorCategory final : public std::error_category {
   constexpr PosixErrorCategory() noexcept = default;
 
   /// \see std::error_category
-  char const* name() const noexcept override {
+  auto name() const noexcept -> char const* override {
     return "PosixError";
   }
 
   /// \see std::error_category
-  std::string message(int error) const override {
+  auto message(int error) const -> std::string override {
     return strerror(error);
   }
 };
 
 /// Return const reference to PosixErrorCategory
-TURBOQ_FORCE_INLINE std::error_category const& getPosixErrorCategory() noexcept {
+[[nodiscard]] constexpr auto getPosixErrorCategory() noexcept -> std::error_category const& {
   static PosixErrorCategory errorCategory;
   return errorCategory;
 }
@@ -40,12 +38,12 @@ template <class T = void, class E = std::error_code>
 using Result = std::expected<T, E>;
 
 /// @see boost::outcome
-constexpr Result<> success() noexcept {
+constexpr auto success() noexcept -> Result<> {
   return {};
 }
 
 /// Return ErrorCode with posix error
-TURBOQ_FORCE_INLINE decltype(auto) makePosixErrorCode(int ec) noexcept {
+inline decltype(auto) makePosixErrorCode(int ec) noexcept {
   return std::unexpected(std::error_code(ec, getPosixErrorCategory()));
 }
 

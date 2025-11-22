@@ -27,7 +27,7 @@ std::size_t const gDefaultPageSize = ::sysconf(_SC_PAGESIZE);
 constexpr std::size_t gPageSize2M = 2 * 1024 * 1024;
 constexpr std::size_t gPageSize1G = 1 * 1024 * 1024 * 1024;
 
-Result<std::size_t> getDefaultHugePageSize() noexcept {
+auto getDefaultHugePageSize() noexcept -> Result<std::size_t> {
   using namespace std::string_view_literals;
 
   static auto const regex = std::regex(R"!(Hugepagesize:\s*(\d+)\s*kB)!");
@@ -68,7 +68,7 @@ Result<std::size_t> getDefaultHugePageSize() noexcept {
   return makePosixErrorCode(ENOENT);
 }
 
-Result<std::size_t> getPageSizeFromMountOpts(std::string_view opts) noexcept {
+auto getPageSizeFromMountOpts(std::string_view opts) noexcept -> Result<std::size_t> {
   using namespace std::string_view_literals;
 
   for (auto const word : std::views::split(std::string_view(opts), ","sv)) {
@@ -94,7 +94,7 @@ struct MemoryMountPoint {
   std::size_t pageSize;
 };
 
-std::vector<MemoryMountPoint> readProcMounts() {
+auto readProcMounts() -> std::vector<MemoryMountPoint> {
   using namespace std::string_view_literals;
 
   auto handle = ::setmntent("/proc/mounts", "r");
@@ -143,12 +143,12 @@ std::vector<MemoryMountPoint> readProcMounts() {
   return entries;
 }
 
-std::vector<MemoryMountPoint> const& getProcMounts() {
+auto getProcMounts() -> std::vector<MemoryMountPoint> const& {
   static std::vector<MemoryMountPoint> entries = readProcMounts();
   return entries;
 }
 
-Result<MemoryMountPoint> getMountEntry1G(std::vector<MemoryMountPoint> const& mounts) noexcept {
+auto getMountEntry1G(std::vector<MemoryMountPoint> const& mounts) noexcept -> Result<MemoryMountPoint> {
   auto const found = std::ranges::find_if(mounts, [](auto const& entry) {
     return entry.pageSize == gPageSize1G;
   });
@@ -158,7 +158,7 @@ Result<MemoryMountPoint> getMountEntry1G(std::vector<MemoryMountPoint> const& mo
   return *found;
 }
 
-Result<MemoryMountPoint> getMountEntry2M(std::vector<MemoryMountPoint> const& mounts) noexcept {
+auto getMountEntry2M(std::vector<MemoryMountPoint> const& mounts) noexcept -> Result<MemoryMountPoint> {
   auto const found = std::ranges::find_if(mounts, [](auto const& entry) {
     return entry.pageSize == gPageSize2M;
   });
@@ -168,7 +168,7 @@ Result<MemoryMountPoint> getMountEntry2M(std::vector<MemoryMountPoint> const& mo
   return *found;
 }
 
-Result<MemoryMountPoint> getMountEntryDefault(std::vector<MemoryMountPoint> const& mounts) noexcept {
+auto getMountEntryDefault(std::vector<MemoryMountPoint> const& mounts) noexcept -> Result<MemoryMountPoint> {
   using namespace std::string_view_literals;
 
   auto found = std::ranges::find_if(mounts, [](auto const& entry) {
@@ -185,7 +185,7 @@ Result<MemoryMountPoint> getMountEntryDefault(std::vector<MemoryMountPoint> cons
   return *found;
 }
 
-Result<MemoryMountPoint> getMountEntryAuto(std::vector<MemoryMountPoint> const& mounts) noexcept {
+auto getMountEntryAuto(std::vector<MemoryMountPoint> const& mounts) noexcept -> Result<MemoryMountPoint> {
   HugePagesOption type = HugePagesOption::HugePages1G;
 
   for (;;) {
@@ -255,7 +255,8 @@ DefaultMemorySource::DefaultMemorySource(std::filesystem::path const& path, std:
   }
 }
 
-Result<std::tuple<File, std::size_t>> DefaultMemorySource::open(std::string_view name, OpenFlags flags) const noexcept {
+auto DefaultMemorySource::open(std::string_view name, OpenFlags flags) const noexcept
+    -> Result<std::tuple<File, std::size_t>> {
   if (flags != OpenFlags::OpenOnly && flags != OpenFlags::OpenOrCreate) {
     return makePosixErrorCode(EINVAL);
   }
@@ -270,8 +271,8 @@ Result<std::tuple<File, std::size_t>> DefaultMemorySource::open(std::string_view
   }
 }
 
-Result<std::tuple<File, std::size_t>> AnonymousMemorySource::open(
-    std::string_view name, [[maybe_unused]] OpenFlags flags) const noexcept {
+auto AnonymousMemorySource::open(std::string_view name, [[maybe_unused]] OpenFlags flags) const noexcept
+    -> Result<std::tuple<File, std::size_t>> {
   auto result = File::anonymous(std::string(name).c_str());
   if (!result) {
     return makePosixErrorCode(result.error().value());

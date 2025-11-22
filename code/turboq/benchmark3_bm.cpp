@@ -3,10 +3,10 @@
 #include <cassert>
 #include <cmath>
 #include <cstdint>
+#include <format>
 #include <numeric>
 #include <print>
 #include <thread>
-#include <format>
 #include <vector>
 
 #include <benchmark/benchmark.h>
@@ -89,7 +89,7 @@ static void BM_DequeueOnly_NoThreads(::benchmark::State& state) {
   std::uint64_t value = 0;
 
   for (auto _ : state) {
-    dequeue(consumer, value);
+    [[maybe_unused]] auto rc = dequeue(consumer, value);
     assert(value == 0);
     benchmark::DoNotOptimize(value);
   }

@@ -7,7 +7,6 @@
 #include <utility>
 
 #include <turboq/Result.h>
-#include <turboq/platform.h>
 
 namespace turboq {
 
@@ -67,79 +66,79 @@ public:
   explicit File(int fd, bool owns = false) noexcept : fd_(fd), owns_(owns) {}
 
   /// Return native descriptor.
-  [[nodiscard]] TURBOQ_FORCE_INLINE int get() const noexcept {
+  [[nodiscard]] auto get() const noexcept -> int {
     return fd_;
   }
 
   /// Return true on descriptor initialized.
-  [[nodiscard]] TURBOQ_FORCE_INLINE bool valid() const noexcept {
+  [[nodiscard]] auto valid() const noexcept -> bool {
     return fd_ != kInvalidFd;
   }
 
   /// \see valid()
-  [[nodiscard]] TURBOQ_FORCE_INLINE explicit operator bool() const noexcept {
-    return valid();
+  [[nodiscard]] explicit operator bool() const noexcept {
+    return this->valid();
   }
 
   /// Returns and releases the descriptor.
-  int release() noexcept;
+  auto release() noexcept -> int;
 
   /// Close descriptor if owned.
-  Result<> closeNoThrow() noexcept;
+  auto closeNoThrow() noexcept -> Result<>;
 
   /// Close descriptor if owned. Throws on error.
   void close();
 
   /// Duplicate file descriptor
-  Result<File> dup() const noexcept;
+  [[nodiscard]] auto dup() const noexcept -> Result<File>;
 
   /// Create a temporary file.
-  static Result<File> temporary(std::filesystem::path const& path = "/tmp") noexcept;
+  [[nodiscard]] static auto temporary(std::filesystem::path const& path = "/tmp") noexcept -> Result<File>;
 
   /// Create an anonymous file.
-  static Result<File> anonymous(char const* name = "") noexcept;
+  [[nodiscard]] static auto anonymous(char const* name = "") noexcept -> Result<File>;
 
   /// Lock file.
   void lock();
 
   /// Try lock file.
-  [[nodiscard]] bool tryLock();
+  [[nodiscard]] auto tryLock() -> bool;
 
   /// Shared lock.
   void lockShared();
 
   /// Try shared lock.
-  [[nodiscard]] bool tryLockShared();
+  [[nodiscard]] auto tryLockShared() -> bool;
 
   /// Unlock file. Throws on error.
   void unlock();
 
   /// Get file size
-  Result<std::size_t> tryGetFileSize() const noexcept;
+  [[nodiscard]] auto tryGetFileSize() const noexcept -> Result<std::size_t>;
 
   /// Get file size. Throws on error.
-  [[nodiscard]] std::size_t getFileSize() const;
+  [[nodiscard]] auto getFileSize() const -> std::size_t;
 
   /// Truncate file
-  Result<> tryTruncate(std::size_t size) const noexcept;
+  auto tryTruncate(std::size_t size) const noexcept -> Result<>;
 
   /// Truncate file, throws on error
   void truncate(std::size_t size) const;
 
   /// Swap descriptor with another.
-  TURBOQ_FORCE_INLINE void swap(File& other) noexcept {
+  void swap(File& other) noexcept {
     using std::swap;
     swap(fd_, other.fd_);
     swap(owns_, other.owns_);
   }
 
   /// Swaps the descriptors and ownership.
-  TURBOQ_FORCE_INLINE friend void swap(File& lhs, File& rhs) noexcept {
+  friend void swap(File& lhs, File& rhs) noexcept {
     lhs.swap(rhs);
   }
 
 protected:
-  TURBOQ_FORCE_INLINE void reset(int fd, bool owns) noexcept {
+  void reset(int fd, bool owns) noexcept {
     [[maybe_unused]] auto const result = closeNoThrow();
     fd_ = fd;
     owns_ = owns;
@@ -147,7 +146,7 @@ protected:
 
   void doLock(int op);
 
-  bool doTryLock(int op);
+  auto doTryLock(int op) -> bool;
 };
 
 } // namespace turboq
