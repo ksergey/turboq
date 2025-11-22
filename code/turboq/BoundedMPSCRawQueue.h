@@ -178,8 +178,8 @@ public:
     }
 
     while (!std::atomic_ref(header_->producerPos)
-                .compare_exchange_weak(currentProducerPos, currentProducerPos + 1, std::memory_order_release,
-                    std::memory_order_relaxed)) [[unlikely]] {
+            .compare_exchange_weak(currentProducerPos, currentProducerPos + 1, std::memory_order_release,
+                std::memory_order_relaxed)) [[unlikely]] {
       if (currentProducerPos - consumerPosCache_ >= header_->length) [[unlikely]] {
         return {};
       }
@@ -361,8 +361,8 @@ class BoundedMPSCRawQueueImpl;
 
 struct BoundedMPSCRawQueueDefaultTraits {
   static constexpr std::string_view kTag = "turboq/MPSC";
-  static constexpr std::size_t kSegmentSize = kHardwareDestructiveInterferenceSize;
-  static constexpr std::size_t kAlign = kHardwareDestructiveInterferenceSize;
+  static constexpr std::size_t kSegmentSize = hardware_destructive_interference_size;
+  static constexpr std::size_t kAlign = hardware_destructive_interference_size;
 };
 
 using BoundedMPSCRawQueue = BoundedMPSCRawQueueImpl<BoundedMPSCRawQueueDefaultTraits>;

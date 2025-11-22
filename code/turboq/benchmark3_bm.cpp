@@ -21,7 +21,7 @@ template <std::size_t SegmentSize>
 struct Traits {
   static constexpr std::string_view kTag = "turboq/bm-only";
   static constexpr std::size_t kSegmentSize = SegmentSize;
-  static constexpr std::size_t kAlign = kHardwareDestructiveInterferenceSize;
+  static constexpr std::size_t kAlign = hardware_destructive_interference_size;
 };
 
 template <std::size_t SegmentSize>

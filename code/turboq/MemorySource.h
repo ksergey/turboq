@@ -18,7 +18,7 @@ struct MemorySource {
 
   virtual ~MemorySource() noexcept {}
 
-  /// Get file descriptor for mapping and page size to roundup
+  /// Get file descriptor for mmap and page size to roundup
   /// \param[in] name is memory source name
   [[nodiscard]] virtual Result<std::tuple<File, std::size_t>> open(
       [[maybe_unused]] std::string_view name, [[maybe_unused]] OpenFlags flags) const noexcept {

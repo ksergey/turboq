@@ -293,8 +293,8 @@ class BoundedSPMCRawQueueImpl;
 
 struct BoundedSPMCRawQueueDefaultTraits {
   static constexpr std::string_view kTag = "turboq/SPMC";
-  static constexpr std::size_t kSegmentSize = kHardwareDestructiveInterferenceSize;
-  static constexpr std::size_t kAlign = kHardwareDestructiveInterferenceSize;
+  static constexpr std::size_t kSegmentSize = hardware_destructive_interference_size;
+  static constexpr std::size_t kAlign = hardware_destructive_interference_size;
 };
 
 using BoundedSPMCRawQueue = BoundedSPMCRawQueueImpl<BoundedSPMCRawQueueDefaultTraits>;
