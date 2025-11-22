@@ -8,12 +8,12 @@
 
 TurboQ is a lightweight C++ library for building low-latency message queues, designed for high-performance applications where every microsecond matters.
 
-## 🚀 Features
+## Features
 
-- ⚡ **Ultra-low latency** - nanosecond-range queue operations
-- 🚀 **Lock-free algorithms** - maximum throughput with no locks
-- 📊 **Multiple queue types** - SPSC, MPSC, MPMC queues
-- 🎯 **Zero-copy operations** - minimal memory overhead
+- **Ultra-low latency** - nanosecond-range queue operations
+- **Lock-free algorithms** - maximum throughput with no locks
+- **Multiple queue types** - SPSC, MPSC, MPMC queues
+- **Zero-copy operations** - minimal memory overhead
 
 ## Quick Start
 
