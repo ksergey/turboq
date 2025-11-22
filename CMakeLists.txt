@@ -6,9 +6,6 @@ option(TURBOQ_SANITIZER "Build with sanitizer" OFF)
 
 include(cmake/TurboQHelpers.cmake)
 
-# if (NOT TARGET fmt::fmt-header-only)
-#   add_subdirectory(deps/fmt)
-# endif()
 if (NOT TARGET doctest::doctest_with_main)
   add_subdirectory(deps/doctest)
 endif()
