@@ -1,7 +1,6 @@
 #include <iostream>
+#include <print>
 #include <string>
-
-#include <fmt/format.h>
 
 #include <turboq/BoundedSPSCRawQueue.h>
 #include <turboq/utils.h>
@@ -29,7 +28,7 @@ int main(int argc, char* argv[]) {
     }
 
   } catch (std::exception const& e) {
-    fmt::print(stderr, "ERROR: {}\n", e.what());
+    std::print(stderr, "ERROR: {}\n", e.what());
     return EXIT_FAILURE;
   }
   return EXIT_SUCCESS;

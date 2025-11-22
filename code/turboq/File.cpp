@@ -10,9 +10,8 @@
 #include <sys/types.h>
 #include <unistd.h>
 
-#include <fmt/format.h>
-
 #include <cassert>
+#include <print>
 #include <system_error>
 
 #ifndef MFD_CLOEXEC
@@ -92,7 +91,7 @@ File::~File() noexcept {
     auto const fd = fd_;
     if (auto const result = closeNoThrow(); !result) {
       if (result.error().value() == EBADF) {
-        fmt::print(stderr, "turboq: closing fd {}, it may already have been closed\n", fd);
+        std::print(stderr, "turboq: closing fd {}, it may already have been closed\n", fd);
       }
     }
   }

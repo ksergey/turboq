@@ -3,16 +3,16 @@
 
 #include "MappedRegion.h"
 
-#include <sys/mman.h>
+#include <print>
 
-#include <fmt/format.h>
+#include <sys/mman.h>
 
 namespace turboq {
 
 MappedRegion::~MappedRegion() noexcept {
   if (size_ > 0) {
     if (::munmap(data_, size_) != 0) {
-      fmt::print(stderr, "closing mapped region, it may be already unmapped\n");
+      std::print(stderr, "closing mapped region, it may be already unmapped\n");
     }
   }
 }

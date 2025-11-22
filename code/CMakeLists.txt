@@ -11,8 +11,6 @@ target_compile_options(${TargetName}
   PUBLIC -Wall -Wextra -Wattributes -Wpedantic -Wstrict-aliasing -Wcast-align -g)
 target_include_directories(${TargetName}
   PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
-target_link_libraries(${TargetName}
-  PUBLIC fmt::fmt-header-only)
 
 if (TURBOQ_PYTHON)
   set_property(TARGET ${TargetName}
