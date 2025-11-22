@@ -1,7 +1,7 @@
 # turboq
 
-[![C++](https://img.shields.io/badge/C++-17+-blue.svg)](https://isocpp.org/)
-[![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+[![C++](https://img.shields.io/badge/C++-23-blue.svg)](https://isocpp.org/)
+[![License](https://img.shields.io/github/license/ksergey/turboq)](LICENSE)
 [![CMake](https://img.shields.io/badge/build-CMake-informational.svg)](https://cmake.org)
 
 **High-performance, low-latency message queue library in C++**
