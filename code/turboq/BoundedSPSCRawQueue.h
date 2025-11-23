@@ -53,7 +53,7 @@ struct BoundedSPSCRawQueueDetail {
   static_assert(std::is_trivially_copyable_v<MessageHeader>);
 
   /// Align message buffer size
-  static constexpr std::size_t alignBufferSize(std::size_t value) noexcept {
+  static constexpr auto alignBufferSize(std::size_t value) noexcept -> std::size_t {
     return detail::align_up(value, kSegmentSize);
   }
 
@@ -65,7 +65,7 @@ struct BoundedSPSCRawQueueDetail {
 
   /// Check buffer points to valid SPMC queue region
   /// Return true on success and false otherwise.
-  [[nodiscard]] static bool check(std::span<std::byte const> buffer) noexcept {
+  [[nodiscard]] static auto check(std::span<std::byte const> buffer) noexcept -> bool {
     if (buffer.size() < kMinBufferSize) {
       return false;
     }
@@ -141,7 +141,7 @@ public:
 
   /// Reserve contiguous space for writing without making it visible to the
   /// consumers. Return empty buffer on error
-  [[nodiscard]] TURBOQ_FORCE_INLINE std::span<std::byte> prepare(std::size_t size) noexcept {
+  [[nodiscard]] TURBOQ_FORCE_INLINE auto prepare(std::size_t size) noexcept -> std::span<std::byte> {
     std::size_t const alignedSize = QueueDetail::alignBufferSize(size + sizeof(MessageHeader));
 
     if (alignedSize <= minFreeSpace_) [[likely]] {
@@ -285,7 +285,7 @@ public:
   }
 
   /// Get next buffer for reading. Return empty buffer in case of no data.
-  [[nodiscard]] TURBOQ_FORCE_INLINE std::span<std::byte const> fetch() noexcept {
+  [[nodiscard]] TURBOQ_FORCE_INLINE auto fetch() noexcept -> std::span<std::byte const> {
     if ((consumerPosCache_ == producerPosCache_ &&
             (producerPosCache_ = std::atomic_ref(header_->producerPos).load(std::memory_order_acquire)) ==
                 consumerPosCache_)) [[unlikely]] {
@@ -428,7 +428,7 @@ public:
   }
 
   /// Create producer for the queue. Throws on error.
-  [[nodiscard]] TURBOQ_FORCE_INLINE Producer createProducer() {
+  [[nodiscard]] TURBOQ_FORCE_INLINE auto createProducer() -> Producer {
     if (!operator bool()) {
       throw std::runtime_error("queue not initialized");
     }
@@ -436,7 +436,7 @@ public:
   }
 
   /// Create consumer for the queue. Throws on error.
-  [[nodiscard]] TURBOQ_FORCE_INLINE Consumer createConsumer() {
+  [[nodiscard]] TURBOQ_FORCE_INLINE auto createConsumer() -> Consumer {
     if (!operator bool()) {
       throw std::runtime_error("queue not initialized");
     }

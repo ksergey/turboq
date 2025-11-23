@@ -58,13 +58,12 @@ struct BoundedMPSCRawQueueDetail {
   /// Control struct for commit state
   struct StateHeader {
     alignas(kAlign) bool commited;
-
     static_assert(std::atomic_ref<bool>::is_always_lock_free);
   };
   static_assert(std::is_trivially_copyable_v<StateHeader>);
 
   /// Align message buffer size
-  static constexpr std::size_t alignBufferSize(std::size_t value) noexcept {
+  [[nodiscard]] static constexpr auto alignBufferSize(std::size_t value) noexcept -> std::size_t {
     return detail::align_up(value, kSegmentSize);
   }
 
@@ -73,7 +72,7 @@ struct BoundedMPSCRawQueueDetail {
 
   /// Check buffer points to valid SPMC queue region
   /// Return true on success and false otherwise.
-  [[nodiscard]] static bool check(std::span<std::byte const> buffer) noexcept {
+  [[nodiscard]] static auto check(std::span<std::byte const> buffer) noexcept -> bool {
     auto const header = std::bit_cast<MemoryHeader const*>(buffer.data());
     if (header->maxMessageSize == 0 || header->length == 0) {
       return false;
@@ -145,7 +144,7 @@ public:
   }
 
   /// Return queue max message size
-  [[nodiscard]] TURBOQ_FORCE_INLINE std::size_t maxMessageSize() const noexcept {
+  [[nodiscard]] TURBOQ_FORCE_INLINE auto maxMessageSize() const noexcept -> std::size_t {
     if (operator bool()) [[likely]] {
       return header_->maxMessageSize;
     }
@@ -153,7 +152,7 @@ public:
   }
 
   /// Return queue length (max messages count)
-  [[nodiscard]] TURBOQ_FORCE_INLINE std::size_t length() const noexcept {
+  [[nodiscard]] TURBOQ_FORCE_INLINE auto length() const noexcept -> std::size_t {
     if (operator bool()) [[likely]] {
       return header_->length;
     }
@@ -162,7 +161,7 @@ public:
 
   /// Reserve contiguous space for writing without making it visible to the consumers
   /// \throw std::runtime_error in case of requested size greater max message size
-  [[nodiscard]] TURBOQ_FORCE_INLINE std::span<std::byte> prepare(std::size_t size) {
+  [[nodiscard]] TURBOQ_FORCE_INLINE auto prepare(std::size_t size) -> std::span<std::byte> {
     std::size_t const totalSize = size + sizeof(MessageHeader);
     if (totalSize > header_->maxMessageSize) [[unlikely]] {
       throw std::runtime_error(
@@ -281,7 +280,7 @@ public:
   }
 
   /// Return queue max message size
-  [[nodiscard]] TURBOQ_FORCE_INLINE std::size_t maxMessageSize() const noexcept {
+  [[nodiscard]] TURBOQ_FORCE_INLINE auto maxMessageSize() const noexcept -> std::size_t {
     if (operator bool()) [[likely]] {
       return header_->maxMessageSize;
     }
@@ -289,7 +288,7 @@ public:
   }
 
   /// Return queue length (max messages count)
-  [[nodiscard]] TURBOQ_FORCE_INLINE std::size_t length() const noexcept {
+  [[nodiscard]] TURBOQ_FORCE_INLINE auto length() const noexcept -> std::size_t {
     if (operator bool()) [[likely]] {
       return header_->length;
     }
@@ -297,7 +296,7 @@ public:
   }
 
   /// Get next buffer for reading. Return empty buffer in case of no data.
-  [[nodiscard]] TURBOQ_FORCE_INLINE std::span<std::byte const> fetch() noexcept {
+  [[nodiscard]] TURBOQ_FORCE_INLINE auto fetch() noexcept -> std::span<std::byte const> {
     if ((consumerPosCache_ == producerPosCache_ &&
             (producerPosCache_ = std::atomic_ref(header_->producerPos).load(std::memory_order_acquire)) ==
                 consumerPosCache_)) [[unlikely]] {
@@ -458,7 +457,7 @@ public:
   }
 
   /// Create producer for the queue. Throws on error.
-  [[nodiscard]] TURBOQ_FORCE_INLINE Producer createProducer() {
+  [[nodiscard]] TURBOQ_FORCE_INLINE auto createProducer() -> Producer {
     if (!operator bool()) {
       throw std::runtime_error("queue in not initialized");
     }
@@ -466,7 +465,7 @@ public:
   }
 
   /// Create consumer for the queue. Throws on error.
-  [[nodiscard]] TURBOQ_FORCE_INLINE Consumer createConsumer() {
+  [[nodiscard]] TURBOQ_FORCE_INLINE auto createConsumer() -> Consumer {
     if (!operator bool()) {
       throw std::runtime_error("queue in not initialized");
     }
