@@ -3,8 +3,8 @@
 
 #pragma once
 
-#include <turboq/File.h>
-#include <turboq/MappedRegion.h>
+#include "../File.h"
+#include "../MappedRegion.h"
 
 namespace turboq::detail {
 
