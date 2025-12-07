@@ -101,13 +101,13 @@ auto File::release() noexcept -> int {
   return released;
 }
 
-auto File::closeNoThrow() noexcept -> Result<> {
+auto File::closeNoThrow() noexcept -> std::expected<void, std::error_code> {
   int const rc = owns_ ? ::close(fd_) : 0;
   release();
   if (rc != 0) {
-    return makePosixErrorCode(errno);
+    return std::unexpected(makePosixErrorCode(errno));
   } else {
-    return success();
+    return {};
   }
 }
 
@@ -117,32 +117,32 @@ void File::close() {
   }
 }
 
-auto File::dup() const noexcept -> Result<File> {
+auto File::dup() const noexcept -> std::expected<File, std::error_code> {
   if (valid()) {
     int fd = ::dup(get());
     if (fd == -1) {
-      return makePosixErrorCode(errno);
+      return std::unexpected(makePosixErrorCode(errno));
     }
-    return File(fd, true);
+    return {File(fd, true)};
   } else {
-    return File();
+    return {File()};
   }
 }
 
-auto File::temporary(std::filesystem::path const& path) noexcept -> Result<File> {
+auto File::temporary(std::filesystem::path const& path) noexcept -> std::expected<File, std::error_code> {
   int fd = ::open(path.c_str(), O_TMPFILE | O_CLOEXEC | O_RDWR, 0666);
   if (fd == -1) {
-    return makePosixErrorCode(errno);
+    return std::unexpected(makePosixErrorCode(errno));
   }
-  return File(fd, true);
+  return {File(fd, true)};
 }
 
-auto File::anonymous(char const* name) noexcept -> Result<File> {
+auto File::anonymous(char const* name) noexcept -> std::expected<File, std::error_code> {
   int fd = ::memfd_create(name, MFD_CLOEXEC);
   if (fd == -1) {
-    return makePosixErrorCode(errno);
+    return std::unexpected(makePosixErrorCode(errno));
   }
-  return File(fd, true);
+  return {File(fd, true)};
 }
 
 void File::lock() {
@@ -168,12 +168,12 @@ void File::unlock() {
   }
 }
 
-auto File::tryGetFileSize() const noexcept -> Result<std::size_t> {
+auto File::tryGetFileSize() const noexcept -> std::expected<std::size_t, std::error_code> {
   struct stat st;
   if (::fstat(this->get(), &st) == -1) {
-    return makePosixErrorCode(errno);
+    return std::unexpected(makePosixErrorCode(errno));
   }
-  return std::size_t(st.st_size);
+  return {std::size_t(st.st_size)};
 }
 
 auto File::getFileSize() const -> std::size_t {
@@ -184,11 +184,11 @@ auto File::getFileSize() const -> std::size_t {
   return st.st_size;
 }
 
-auto File::tryTruncate(std::size_t size) const noexcept -> Result<> {
+auto File::tryTruncate(std::size_t size) const noexcept -> std::expected<void, std::error_code> {
   if (::ftruncate(this->get(), size) == -1) {
-    return makePosixErrorCode(errno);
+    return std::unexpected(makePosixErrorCode(errno));
   }
-  return success();
+  return {};
 }
 
 void File::truncate(std::size_t size) const {

@@ -5,8 +5,6 @@
 
 #include <cerrno>
 #include <cstring>
-#include <exception>
-#include <expected>
 #include <system_error>
 
 namespace turboq {
@@ -32,19 +30,9 @@ struct PosixErrorCategory final : public std::error_category {
   return errorCategory;
 }
 
-/// @see boost::outcome
-/// mimic: std::expected from c++23
-template <class T = void, class E = std::error_code>
-using Result = std::expected<T, E>;
-
-/// @see boost::outcome
-constexpr auto success() noexcept -> Result<> {
-  return {};
-}
-
 /// Return ErrorCode with posix error
-inline decltype(auto) makePosixErrorCode(int ec) noexcept {
-  return std::unexpected(std::error_code(ec, getPosixErrorCategory()));
+[[nodiscard]] inline auto makePosixErrorCode(int ec) noexcept -> std::error_code {
+  return std::error_code{ec, getPosixErrorCategory()};
 }
 
 } // namespace turboq

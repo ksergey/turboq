@@ -3,10 +3,11 @@
 
 #pragma once
 
+#include <expected>
 #include <filesystem>
 #include <utility>
 
-#include "Result.h"
+#include "PosixError.h"
 
 namespace turboq {
 
@@ -84,19 +85,20 @@ public:
   auto release() noexcept -> int;
 
   /// Close descriptor if owned.
-  auto closeNoThrow() noexcept -> Result<>;
+  auto closeNoThrow() noexcept -> std::expected<void, std::error_code>;
 
   /// Close descriptor if owned. Throws on error.
   void close();
 
   /// Duplicate file descriptor
-  [[nodiscard]] auto dup() const noexcept -> Result<File>;
+  [[nodiscard]] auto dup() const noexcept -> std::expected<File, std::error_code>;
 
   /// Create a temporary file.
-  [[nodiscard]] static auto temporary(std::filesystem::path const& path = "/tmp") noexcept -> Result<File>;
+  [[nodiscard]] static auto temporary(std::filesystem::path const& path = "/tmp") noexcept
+      -> std::expected<File, std::error_code>;
 
   /// Create an anonymous file.
-  [[nodiscard]] static auto anonymous(char const* name = "") noexcept -> Result<File>;
+  [[nodiscard]] static auto anonymous(char const* name = "") noexcept -> std::expected<File, std::error_code>;
 
   /// Lock file.
   void lock();
@@ -114,13 +116,13 @@ public:
   void unlock();
 
   /// Get file size
-  [[nodiscard]] auto tryGetFileSize() const noexcept -> Result<std::size_t>;
+  [[nodiscard]] auto tryGetFileSize() const noexcept -> std::expected<std::size_t, std::error_code>;
 
   /// Get file size. Throws on error.
   [[nodiscard]] auto getFileSize() const -> std::size_t;
 
   /// Truncate file
-  auto tryTruncate(std::size_t size) const noexcept -> Result<>;
+  auto tryTruncate(std::size_t size) const noexcept -> std::expected<void, std::error_code>;
 
   /// Truncate file, throws on error
   void truncate(std::size_t size) const;

@@ -27,14 +27,14 @@ std::size_t const gDefaultPageSize = ::sysconf(_SC_PAGESIZE);
 constexpr std::size_t gPageSize2M = 2 * 1024 * 1024;
 constexpr std::size_t gPageSize1G = 1 * 1024 * 1024 * 1024;
 
-auto getDefaultHugePageSize() noexcept -> Result<std::size_t> {
+auto getDefaultHugePageSize() noexcept -> std::expected<std::size_t, std::error_code> {
   using namespace std::string_view_literals;
 
   static auto const regex = std::regex(R"!(Hugepagesize:\s*(\d+)\s*kB)!");
 
   auto handle = ::fopen("/proc/meminfo", "r");
   if (!handle) {
-    return makePosixErrorCode(errno);
+    return std::unexpected(makePosixErrorCode(errno));
   }
 
   char* line = nullptr;
@@ -59,16 +59,16 @@ auto getDefaultHugePageSize() noexcept -> Result<std::size_t> {
     std::size_t pageSizeKiB;
     auto const rc = std::from_chars(match[1].first, match[1].second, pageSizeKiB);
     if (rc.ec == std::errc()) {
-      return pageSizeKiB * 1024;
+      return {pageSizeKiB * 1024};
     } else {
-      return makePosixErrorCode(EINVAL);
+      return std::unexpected(makePosixErrorCode(EINVAL));
     }
   }
 
-  return makePosixErrorCode(ENOENT);
+  return std::unexpected(makePosixErrorCode(ENOENT));
 }
 
-auto getPageSizeFromMountOpts(std::string_view opts) noexcept -> Result<std::size_t> {
+auto getPageSizeFromMountOpts(std::string_view opts) noexcept -> std::expected<std::size_t, std::error_code> {
   using namespace std::string_view_literals;
 
   for (auto const word : std::views::split(std::string_view(opts), ","sv)) {
@@ -78,15 +78,15 @@ auto getPageSizeFromMountOpts(std::string_view opts) noexcept -> Result<std::siz
     }
     std::string_view value = option.substr("pagesize="sv.size());
     if (value == "2M"sv) {
-      return gPageSize2M;
+      return {gPageSize2M};
     } else if (value == "1G"sv) {
-      return gPageSize1G;
+      return {gPageSize1G};
     } else {
-      return makePosixErrorCode(EINVAL);
+      return std::unexpected(makePosixErrorCode(EINVAL));
     }
   }
 
-  return makePosixErrorCode(ENOENT);
+  return std::unexpected(makePosixErrorCode(ENOENT));
 }
 
 struct MemoryMountPoint {
@@ -148,27 +148,30 @@ auto getProcMounts() -> std::vector<MemoryMountPoint> const& {
   return entries;
 }
 
-auto getMountEntry1G(std::vector<MemoryMountPoint> const& mounts) noexcept -> Result<MemoryMountPoint> {
+auto getMountEntry1G(std::vector<MemoryMountPoint> const& mounts) noexcept
+    -> std::expected<MemoryMountPoint, std::error_code> {
   auto const found = std::ranges::find_if(mounts, [](auto const& entry) {
     return entry.pageSize == gPageSize1G;
   });
   if (found == mounts.end()) {
-    return makePosixErrorCode(ENOENT);
+    return std::unexpected(makePosixErrorCode(ENOENT));
   }
-  return *found;
+  return {*found};
 }
 
-auto getMountEntry2M(std::vector<MemoryMountPoint> const& mounts) noexcept -> Result<MemoryMountPoint> {
+auto getMountEntry2M(std::vector<MemoryMountPoint> const& mounts) noexcept
+    -> std::expected<MemoryMountPoint, std::error_code> {
   auto const found = std::ranges::find_if(mounts, [](auto const& entry) {
     return entry.pageSize == gPageSize2M;
   });
   if (found == mounts.end()) {
-    return makePosixErrorCode(ENOENT);
+    return std::unexpected(makePosixErrorCode(ENOENT));
   }
-  return *found;
+  return {*found};
 }
 
-auto getMountEntryDefault(std::vector<MemoryMountPoint> const& mounts) noexcept -> Result<MemoryMountPoint> {
+auto getMountEntryDefault(std::vector<MemoryMountPoint> const& mounts) noexcept
+    -> std::expected<MemoryMountPoint, std::error_code> {
   using namespace std::string_view_literals;
 
   auto found = std::ranges::find_if(mounts, [](auto const& entry) {
@@ -180,12 +183,13 @@ auto getMountEntryDefault(std::vector<MemoryMountPoint> const& mounts) noexcept 
     });
   }
   if (found == mounts.end()) {
-    return makePosixErrorCode(ENOENT);
+    return std::unexpected(makePosixErrorCode(ENOENT));
   }
-  return *found;
+  return {*found};
 }
 
-auto getMountEntryAuto(std::vector<MemoryMountPoint> const& mounts) noexcept -> Result<MemoryMountPoint> {
+auto getMountEntryAuto(std::vector<MemoryMountPoint> const& mounts) noexcept
+    -> std::expected<MemoryMountPoint, std::error_code> {
   HugePagesOption type = HugePagesOption::HugePages1G;
 
   for (;;) {
@@ -211,13 +215,13 @@ auto getMountEntryAuto(std::vector<MemoryMountPoint> const& mounts) noexcept -> 
     }
   }
 
-  return makePosixErrorCode(ENOENT);
+  return std::unexpected(makePosixErrorCode(ENOENT));
 }
 
 } // namespace
 
 DefaultMemorySource::DefaultMemorySource(HugePagesOption hugePagesOpt) {
-  Result<MemoryMountPoint> result = makePosixErrorCode(ENOENT);
+  std::expected<MemoryMountPoint, std::error_code> result{std::unexpected(makePosixErrorCode(ENOENT))};
 
   switch (hugePagesOpt) {
   case HugePagesOption::Auto: {
@@ -256,28 +260,28 @@ DefaultMemorySource::DefaultMemorySource(std::filesystem::path const& path, std:
 }
 
 auto DefaultMemorySource::open(std::string_view name, OpenFlags flags) const noexcept
-    -> Result<std::tuple<File, std::size_t>> {
+    -> std::expected<std::tuple<File, std::size_t>, std::error_code> {
   if (flags != OpenFlags::OpenOnly && flags != OpenFlags::OpenOrCreate) {
-    return makePosixErrorCode(EINVAL);
+    return std::unexpected(makePosixErrorCode(EINVAL));
   }
 
   try {
     auto const filePath = path_ / name;
     auto file = (flags == OpenFlags::OpenOnly) ? File(kOpenOnly, filePath, OpenMode::ReadWrite)
                                                : File(kOpenOrCreate, filePath, OpenMode::ReadWrite);
-    return std::make_tuple(std::move(file), pageSize_);
+    return {std::make_tuple(std::move(file), pageSize_)};
   } catch (...) {
-    return makePosixErrorCode(EFAULT);
+    return std::unexpected(makePosixErrorCode(EFAULT));
   }
 }
 
 auto AnonymousMemorySource::open(std::string_view name, [[maybe_unused]] OpenFlags flags) const noexcept
-    -> Result<std::tuple<File, std::size_t>> {
+    -> std::expected<std::tuple<File, std::size_t>, std::error_code> {
   auto result = File::anonymous(std::string(name).c_str());
   if (!result) {
-    return makePosixErrorCode(result.error().value());
+    return std::unexpected(makePosixErrorCode(result.error().value()));
   }
-  return std::make_tuple(std::move(result).value(), gDefaultPageSize);
+  return {std::make_tuple(std::move(result).value(), gDefaultPageSize)};
 }
 
 } // namespace turboq
