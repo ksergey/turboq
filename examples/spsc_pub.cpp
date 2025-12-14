@@ -3,7 +3,6 @@
 #include <string>
 
 #include <turboq/BoundedSPSCRawQueue.h>
-#include <turboq/utils.h>
 
 int main(int argc, char* argv[]) {
   try {

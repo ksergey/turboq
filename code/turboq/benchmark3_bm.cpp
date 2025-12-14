@@ -14,9 +14,9 @@
 #include "BoundedMPSCRawQueue.h"
 #include "BoundedSPMCRawQueue.h"
 #include "BoundedSPSCRawQueue.h"
-#include "utils.h"
+#include "TestUtils.h"
 
-namespace turboq {
+namespace turboq::testing {
 
 template <std::size_t SegmentSize>
 struct Traits {
@@ -273,4 +273,4 @@ BENCHMARK(BM_EnqueueDequeue<MPSCQueue<64>, 4, 1, kOps, BindToCore>)->Apply(Apply
 BENCHMARK(BM_EnqueueDequeue<MPSCQueue<128>, 4, 1, kOps>)->Apply(ApplyCustomArgs);
 BENCHMARK(BM_EnqueueDequeue<MPSCQueue<128>, 4, 1, kOps, BindToCore>)->Apply(ApplyCustomArgs);
 
-} // namespace turboq
+} // namespace turboq::testing

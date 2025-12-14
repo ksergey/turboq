@@ -6,9 +6,9 @@
 #include <bit>
 #include <type_traits>
 
-#include "concepts.h"
+#include "Concepts.h"
 
-namespace turboq {
+namespace turboq::testing {
 
 template <typename ProducerT, typename DataT>
   requires Producer<ProducerT> and std::is_trivially_copyable_v<DataT>
@@ -45,4 +45,4 @@ template <typename ConsumerT, typename DataT>
   return true;
 }
 
-} // namespace turboq
+} // namespace turboq::testing

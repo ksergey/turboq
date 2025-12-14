@@ -251,7 +251,7 @@ DefaultMemorySource::DefaultMemorySource(HugePagesOption hugePagesOpt) {
 
 DefaultMemorySource::DefaultMemorySource(std::filesystem::path const& path, std::size_t pageSize)
     : path_(path), pageSize_(pageSize) {
-  if (!exists(path)) {
+  if (!std::filesystem::exists(path)) {
     throw std::system_error(ENOENT, getPosixErrorCategory(), "directory not exists");
   }
   if (!std::has_single_bit(pageSize)) {

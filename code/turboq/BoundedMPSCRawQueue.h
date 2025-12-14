@@ -15,9 +15,9 @@
 
 #include "MappedRegion.h"
 #include "MemorySource.h"
+#include "Platform.h"
 #include "detail/math.h"
 #include "detail/memory.h"
-#include "platform.h"
 
 namespace turboq {
 namespace detail {
