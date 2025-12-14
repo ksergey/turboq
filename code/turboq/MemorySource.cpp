@@ -237,7 +237,7 @@ DefaultMemorySource::DefaultMemorySource(HugePagesOption hugePagesOpt) {
     result = getMountEntry1G(getProcMounts());
   } break;
   default: {
-    throw std::system_error(EINVAL, getPosixErrorCategory(), "invalid hugePagesOpt value");
+    throw std::system_error(EINVAL, getPosixErrorCategory(), "Invalid hugePagesOpt value");
   } break;
   }
 
@@ -252,10 +252,10 @@ DefaultMemorySource::DefaultMemorySource(HugePagesOption hugePagesOpt) {
 DefaultMemorySource::DefaultMemorySource(std::filesystem::path const& path, std::size_t pageSize)
     : path_(path), pageSize_(pageSize) {
   if (!std::filesystem::exists(path)) {
-    throw std::system_error(ENOENT, getPosixErrorCategory(), "directory not exists");
+    throw std::system_error(ENOENT, getPosixErrorCategory(), "Directory not exists");
   }
   if (!std::has_single_bit(pageSize)) {
-    throw std::system_error(EINVAL, getPosixErrorCategory(), "page size must be power of two");
+    throw std::system_error(EINVAL, getPosixErrorCategory(), "Page size must be power of two");
   }
 }
 
