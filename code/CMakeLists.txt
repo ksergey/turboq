@@ -1,6 +1,6 @@
 set(TargetName turboq)
 
-add_library(${TargetName})
+add_library(${TargetName} STATIC)
 target_compile_features(${TargetName}
   PUBLIC cxx_std_23)
 set_target_properties(${TargetName}
@@ -8,7 +8,7 @@ set_target_properties(${TargetName}
     CXX_STANDARD_REQUIRED ON
     CXX_EXTENSIONS OFF)
 target_compile_options(${TargetName}
-  PUBLIC -Wall -Wextra -Wattributes -Wpedantic -Wstrict-aliasing -Wcast-align -g)
+  PUBLIC -Wall -Wextra -Wattributes -Wpedantic -Wstrict-aliasing -Wcast-align -g -fno-rtti)
 target_include_directories(${TargetName}
   PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 

@@ -15,6 +15,8 @@
 #include <system_error>
 
 #ifndef MFD_CLOEXEC
+#include <syscall.h>
+
 auto memfd_create(const char* name, unsigned int flags) -> int {
   // Shouldn't work on linux before 3.17
   return syscall(__NR_memfd_create, name, flags);
