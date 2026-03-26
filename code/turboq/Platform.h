@@ -21,7 +21,7 @@
 namespace turboq {
 
 /// Mimic: std::hardware_destructive_interference_size
-constexpr std::size_t kHardwareDestructiveInterferenceSize = 128;
+constexpr std::size_t kHardwareDestructiveInterferenceSize = 64;
 
 /// Mimic: std::hardware_constructive_interference_size
 constexpr std::size_t kHardwareConstructiveInterferenceSize = 64;
