@@ -360,8 +360,8 @@ class BoundedMPSCRawQueueImpl;
 
 struct BoundedMPSCRawQueueDefaultTraits {
   static constexpr std::string_view kTag = "turboq/MPSC";
-  static constexpr std::size_t kSegmentSize = kHardwareDestructiveInterferenceSize;
-  static constexpr std::size_t kAlign = kHardwareDestructiveInterferenceSize;
+  static constexpr std::size_t kSegmentSize = kCacheLineSize;
+  static constexpr std::size_t kAlign = kCacheLineSize;
 };
 
 using BoundedMPSCRawQueue = BoundedMPSCRawQueueImpl<BoundedMPSCRawQueueDefaultTraits>;
