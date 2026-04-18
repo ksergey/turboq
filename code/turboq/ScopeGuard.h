@@ -11,28 +11,28 @@ namespace turboq {
 template <typename Fn>
 class [[nodiscard]] ScopeGuard final {
 private:
-  static_assert(std::is_nothrow_move_constructible_v<Fn>);
+    static_assert(std::is_nothrow_move_constructible_v<Fn>);
 
-  [[no_unique_address]] Fn fn_;
-  bool released_ = false;
+    [[no_unique_address]] Fn fn_;
+    bool released_ = false;
 
 public:
-  ScopeGuard(Fn&& fn) noexcept : fn_((Fn&&)fn) {}
+    ScopeGuard(Fn&& fn) noexcept : fn_((Fn&&)fn) {}
 
-  ~ScopeGuard() noexcept {
-    reset();
-  }
-
-  void release() noexcept {
-    released_ = true;
-  }
-
-  void reset() noexcept {
-    static_assert(noexcept(((Fn&&)fn_)()));
-    if (!std::exchange(released_, true)) {
-      ((Fn&&)fn_)();
+    ~ScopeGuard() noexcept {
+        reset();
     }
-  }
+
+    void release() noexcept {
+        released_ = true;
+    }
+
+    void reset() noexcept {
+        static_assert(noexcept(((Fn&&)fn_)()));
+        if (!std::exchange(released_, true)) {
+            ((Fn&&)fn_)();
+        }
+    }
 };
 
 template <typename Fn>

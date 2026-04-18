@@ -15,17 +15,17 @@ namespace turboq {
 
 /// Memory source interface
 struct MemorySource {
-  enum OpenFlags { OpenOnly, OpenOrCreate };
+    enum OpenFlags { OpenOnly, OpenOrCreate };
 
-  virtual ~MemorySource() noexcept {}
+    virtual ~MemorySource() noexcept {}
 
-  /// Get file descriptor for mapping and page size to roundup
-  /// \param[in] name is memory source name
-  [[nodiscard]] virtual auto open(
-      [[maybe_unused]] std::string_view name, [[maybe_unused]] OpenFlags flags) const noexcept
-      -> std::expected<std::tuple<File, std::size_t>, std::error_code> {
-    return std::unexpected(makePosixErrorCode(ENOSYS));
-  }
+    /// Get file descriptor for mapping and page size to roundup
+    /// \param[in] name is memory source name
+    [[nodiscard]] virtual auto open(
+        [[maybe_unused]] std::string_view name, [[maybe_unused]] OpenFlags flags) const noexcept
+        -> std::expected<std::tuple<File, std::size_t>, std::error_code> {
+        return std::unexpected(makePosixErrorCode(ENOSYS));
+    }
 };
 
 /// HugePages option selector
@@ -34,29 +34,29 @@ enum class HugePagesOption { Auto, HugePages2M, HugePages1G, None };
 /// Default memory source
 class DefaultMemorySource final : public MemorySource {
 private:
-  std::filesystem::path path_;
-  std::size_t pageSize_ = 0;
+    std::filesystem::path path_;
+    std::size_t pageSize_ = 0;
 
 public:
-  /// Construct memory source
-  /// \param[in] hugePagesOpt is huge pages option
-  /// Throws on error
-  explicit DefaultMemorySource(HugePagesOption hugePagesOpt = HugePagesOption::None);
+    /// Construct memory source
+    /// \param[in] hugePagesOpt is huge pages option
+    /// Throws on error
+    explicit DefaultMemorySource(HugePagesOption hugePagesOpt = HugePagesOption::None);
 
-  /// Construct memory source explicit
-  /// Throws on error
-  DefaultMemorySource(std::filesystem::path const& path, std::size_t pageSize);
+    /// Construct memory source explicit
+    /// Throws on error
+    DefaultMemorySource(std::filesystem::path const& path, std::size_t pageSize);
 
-  /// \see MemorySource::open
-  [[nodiscard]] auto open(std::string_view name, OpenFlags flags) const noexcept
-      -> std::expected<std::tuple<File, std::size_t>, std::error_code> override;
+    /// \see MemorySource::open
+    [[nodiscard]] auto open(std::string_view name, OpenFlags flags) const noexcept
+        -> std::expected<std::tuple<File, std::size_t>, std::error_code> override;
 };
 
 /// Anonymous memory source
 struct AnonymousMemorySource final : public MemorySource {
-  /// \see MemorySource::open
-  [[nodiscard]] auto open(std::string_view name, OpenFlags flags) const noexcept
-      -> std::expected<std::tuple<File, std::size_t>, std::error_code> override;
+    /// \see MemorySource::open
+    [[nodiscard]] auto open(std::string_view name, OpenFlags flags) const noexcept
+        -> std::expected<std::tuple<File, std::size_t>, std::error_code> override;
 };
 
 } // namespace turboq

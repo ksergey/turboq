@@ -29,126 +29,126 @@ enum class OpenMode { ReadOnly, ReadWrite };
 /// File descriptor wrapper
 class File {
 private:
-  static constexpr int kInvalidFd = -1;
+    static constexpr int kInvalidFd = -1;
 
-  int fd_ = kInvalidFd;
-  bool owns_ = false;
+    int fd_ = kInvalidFd;
+    bool owns_ = false;
 
 public:
-  File(File const&) = delete;
-  File& operator=(File const&) = delete;
+    File(File const&) = delete;
+    File& operator=(File const&) = delete;
 
-  File() = default;
+    File() = default;
 
-  File(File&& other) noexcept : fd_(other.fd_), owns_(other.owns_) {
-    other.release();
-  }
+    File(File&& other) noexcept : fd_(other.fd_), owns_(other.owns_) {
+        other.release();
+    }
 
-  File& operator=(File&& other) noexcept {
-    [[maybe_unused]] auto const result = closeNoThrow();
-    swap(other);
-    return *this;
-  }
+    File& operator=(File&& other) noexcept {
+        [[maybe_unused]] auto const result = closeNoThrow();
+        swap(other);
+        return *this;
+    }
 
-  /// Open file. Throws on open error.
-  File(OpenOnly, std::filesystem::path const& path, OpenMode openMode = OpenMode::ReadOnly);
+    /// Open file. Throws on open error.
+    File(OpenOnly, std::filesystem::path const& path, OpenMode openMode = OpenMode::ReadOnly);
 
-  /// Create file if not exists. Throws on error.
-  File(CreateOnly, std::filesystem::path const& path, OpenMode openMode = OpenMode::ReadOnly, mode_t mode = 0666);
+    /// Create file if not exists. Throws on error.
+    File(CreateOnly, std::filesystem::path const& path, OpenMode openMode = OpenMode::ReadOnly, mode_t mode = 0666);
 
-  /// Create file if not exists or open otherwise. Throws on error.
-  File(OpenOrCreate, std::filesystem::path const& path, OpenMode openMode = OpenMode::ReadOnly, mode_t mode = 0666);
+    /// Create file if not exists or open otherwise. Throws on error.
+    File(OpenOrCreate, std::filesystem::path const& path, OpenMode openMode = OpenMode::ReadOnly, mode_t mode = 0666);
 
-  /// Destructor. Close file descriptor if owns it.
-  virtual ~File() noexcept;
+    /// Destructor. Close file descriptor if owns it.
+    virtual ~File() noexcept;
 
-  /// Construct from raw descritor.
-  /// Become fd owner on owns set to true.
-  explicit File(int fd, bool owns = false) noexcept : fd_(fd), owns_(owns) {}
+    /// Construct from raw descritor.
+    /// Become fd owner on owns set to true.
+    explicit File(int fd, bool owns = false) noexcept : fd_(fd), owns_(owns) {}
 
-  /// Return native descriptor.
-  [[nodiscard]] auto get() const noexcept -> int {
-    return fd_;
-  }
+    /// Return native descriptor.
+    [[nodiscard]] auto get() const noexcept -> int {
+        return fd_;
+    }
 
-  /// Return true on descriptor initialized.
-  [[nodiscard]] auto valid() const noexcept -> bool {
-    return fd_ != kInvalidFd;
-  }
+    /// Return true on descriptor initialized.
+    [[nodiscard]] auto valid() const noexcept -> bool {
+        return fd_ != kInvalidFd;
+    }
 
-  /// \see valid()
-  [[nodiscard]] explicit operator bool() const noexcept {
-    return this->valid();
-  }
+    /// \see valid()
+    [[nodiscard]] explicit operator bool() const noexcept {
+        return this->valid();
+    }
 
-  /// Returns and releases the descriptor.
-  auto release() noexcept -> int;
+    /// Returns and releases the descriptor.
+    auto release() noexcept -> int;
 
-  /// Close descriptor if owned.
-  auto closeNoThrow() noexcept -> std::expected<void, std::error_code>;
+    /// Close descriptor if owned.
+    auto closeNoThrow() noexcept -> std::expected<void, std::error_code>;
 
-  /// Close descriptor if owned. Throws on error.
-  void close();
+    /// Close descriptor if owned. Throws on error.
+    void close();
 
-  /// Duplicate file descriptor
-  [[nodiscard]] auto dup() const noexcept -> std::expected<File, std::error_code>;
+    /// Duplicate file descriptor
+    [[nodiscard]] auto dup() const noexcept -> std::expected<File, std::error_code>;
 
-  /// Create a temporary file.
-  [[nodiscard]] static auto temporary(std::filesystem::path const& path = "/tmp") noexcept
-      -> std::expected<File, std::error_code>;
+    /// Create a temporary file.
+    [[nodiscard]] static auto temporary(std::filesystem::path const& path = "/tmp") noexcept
+        -> std::expected<File, std::error_code>;
 
-  /// Create an anonymous file.
-  [[nodiscard]] static auto anonymous(char const* name = "") noexcept -> std::expected<File, std::error_code>;
+    /// Create an anonymous file.
+    [[nodiscard]] static auto anonymous(char const* name = "") noexcept -> std::expected<File, std::error_code>;
 
-  /// Lock file.
-  void lock();
+    /// Lock file.
+    void lock();
 
-  /// Try lock file.
-  [[nodiscard]] auto tryLock() -> bool;
+    /// Try lock file.
+    [[nodiscard]] auto tryLock() -> bool;
 
-  /// Shared lock.
-  void lockShared();
+    /// Shared lock.
+    void lockShared();
 
-  /// Try shared lock.
-  [[nodiscard]] auto tryLockShared() -> bool;
+    /// Try shared lock.
+    [[nodiscard]] auto tryLockShared() -> bool;
 
-  /// Unlock file. Throws on error.
-  void unlock();
+    /// Unlock file. Throws on error.
+    void unlock();
 
-  /// Get file size
-  [[nodiscard]] auto tryGetFileSize() const noexcept -> std::expected<std::size_t, std::error_code>;
+    /// Get file size
+    [[nodiscard]] auto tryGetFileSize() const noexcept -> std::expected<std::size_t, std::error_code>;
 
-  /// Get file size. Throws on error.
-  [[nodiscard]] auto getFileSize() const -> std::size_t;
+    /// Get file size. Throws on error.
+    [[nodiscard]] auto getFileSize() const -> std::size_t;
 
-  /// Truncate file
-  auto tryTruncate(std::size_t size) const noexcept -> std::expected<void, std::error_code>;
+    /// Truncate file
+    auto tryTruncate(std::size_t size) const noexcept -> std::expected<void, std::error_code>;
 
-  /// Truncate file, throws on error
-  void truncate(std::size_t size) const;
+    /// Truncate file, throws on error
+    void truncate(std::size_t size) const;
 
-  /// Swap descriptor with another.
-  void swap(File& other) noexcept {
-    using std::swap;
-    swap(fd_, other.fd_);
-    swap(owns_, other.owns_);
-  }
+    /// Swap descriptor with another.
+    void swap(File& other) noexcept {
+        using std::swap;
+        swap(fd_, other.fd_);
+        swap(owns_, other.owns_);
+    }
 
-  /// Swaps the descriptors and ownership.
-  friend void swap(File& lhs, File& rhs) noexcept {
-    lhs.swap(rhs);
-  }
+    /// Swaps the descriptors and ownership.
+    friend void swap(File& lhs, File& rhs) noexcept {
+        lhs.swap(rhs);
+    }
 
 protected:
-  void reset(int fd, bool owns) noexcept {
-    [[maybe_unused]] auto const result = closeNoThrow();
-    fd_ = fd;
-    owns_ = owns;
-  }
+    void reset(int fd, bool owns) noexcept {
+        [[maybe_unused]] auto const result = closeNoThrow();
+        fd_ = fd;
+        owns_ = owns;
+    }
 
-  void doLock(int op);
+    void doLock(int op);
 
-  auto doTryLock(int op) -> bool;
+    auto doTryLock(int op) -> bool;
 };
 
 } // namespace turboq

@@ -12,75 +12,75 @@ namespace turboq {
 
 class MappedRegion {
 private:
-  std::byte* data_ = nullptr;
-  std::size_t size_ = 0;
+    std::byte* data_ = nullptr;
+    std::size_t size_ = 0;
 
 public:
-  MappedRegion(MappedRegion const&) = delete;
-  MappedRegion& operator=(MappedRegion const&) = delete;
+    MappedRegion(MappedRegion const&) = delete;
+    MappedRegion& operator=(MappedRegion const&) = delete;
 
-  /// Move constructor.
-  MappedRegion(MappedRegion&& that) noexcept {
-    swap(that);
-  }
+    /// Move constructor.
+    MappedRegion(MappedRegion&& that) noexcept {
+        swap(that);
+    }
 
-  /// Move assignment.
-  MappedRegion& operator=(MappedRegion&& that) noexcept {
-    swap(that);
-    return *this;
-  }
+    /// Move assignment.
+    MappedRegion& operator=(MappedRegion&& that) noexcept {
+        swap(that);
+        return *this;
+    }
 
-  /// Construct empty object for late initialization.
-  MappedRegion() = default;
+    /// Construct empty object for late initialization.
+    MappedRegion() = default;
 
-  /// Construct mapped region from pointer to data and size. Own early mapped
-  /// region with mmap.
-  MappedRegion(std::byte* data, std::size_t size) noexcept : data_(data), size_(size) {}
+    /// Construct mapped region from pointer to data and size. Own early mapped
+    /// region with mmap.
+    MappedRegion(std::byte* data, std::size_t size) noexcept : data_(data), size_(size) {}
 
-  /// Destructor. Unmap mmaped memory if owns it.
-  virtual ~MappedRegion() noexcept;
+    /// Destructor. Unmap mmaped memory if owns it.
+    virtual ~MappedRegion() noexcept;
 
-  /// Return true if initialized.
-  [[nodiscard]] explicit operator bool() const noexcept {
-    return size_ > 0;
-  }
+    /// Return true if initialized.
+    [[nodiscard]] explicit operator bool() const noexcept {
+        return size_ > 0;
+    }
 
-  /// Return pointer to data.
-  [[nodiscard]] auto data() const noexcept -> std::byte const* {
-    return data_;
-  }
+    /// Return pointer to data.
+    [[nodiscard]] auto data() const noexcept -> std::byte const* {
+        return data_;
+    }
 
-  /// \overload
-  [[nodiscard]] auto data() noexcept -> std::byte* {
-    return data_;
-  }
+    /// \overload
+    [[nodiscard]] auto data() noexcept -> std::byte* {
+        return data_;
+    }
 
-  /// Return size of data.
-  [[nodiscard]] auto size() const noexcept -> std::size_t {
-    return size_;
-  }
+    /// Return size of data.
+    [[nodiscard]] auto size() const noexcept -> std::size_t {
+        return size_;
+    }
 
-  /// Return mapped region content
-  [[nodiscard]] auto content() const noexcept -> std::span<std::byte const> {
-    return {data_, size_};
-  }
+    /// Return mapped region content
+    [[nodiscard]] auto content() const noexcept -> std::span<std::byte const> {
+        return {data_, size_};
+    }
 
-  /// \overload
-  [[nodiscard]] auto content() noexcept -> std::span<std::byte> {
-    return {data_, size_};
-  }
+    /// \overload
+    [[nodiscard]] auto content() noexcept -> std::span<std::byte> {
+        return {data_, size_};
+    }
 
-  /// Swap resources with other MappedRegion object.
-  void swap(MappedRegion& that) noexcept {
-    using std::swap;
-    swap(data_, that.data_);
-    swap(size_, that.size_);
-  }
+    /// Swap resources with other MappedRegion object.
+    void swap(MappedRegion& that) noexcept {
+        using std::swap;
+        swap(data_, that.data_);
+        swap(size_, that.size_);
+    }
 
-  /// Swap to MappedRegion objects.
-  friend void swap(MappedRegion& a, MappedRegion& b) noexcept {
-    a.swap(b);
-  }
+    /// Swap to MappedRegion objects.
+    friend void swap(MappedRegion& a, MappedRegion& b) noexcept {
+        a.swap(b);
+    }
 };
 
 } // namespace turboq

@@ -11,38 +11,38 @@
 namespace turboq::testing {
 
 template <typename ProducerT, typename DataT>
-  requires Producer<ProducerT> and std::is_trivially_copyable_v<DataT>
+    requires Producer<ProducerT> and std::is_trivially_copyable_v<DataT>
 [[nodiscard]] auto enqueue(ProducerT& producer, DataT const& data) -> bool {
-  auto buffer = producer.prepare(sizeof(data));
-  if (buffer.empty()) {
-    return false;
-  }
-  *std::bit_cast<DataT*>(buffer.data()) = data;
-  producer.commit();
-  return true;
+    auto buffer = producer.prepare(sizeof(data));
+    if (buffer.empty()) {
+        return false;
+    }
+    *std::bit_cast<DataT*>(buffer.data()) = data;
+    producer.commit();
+    return true;
 }
 
 template <typename ConsumerT, typename DataT>
-  requires Consumer<ConsumerT> and std::is_trivially_copyable_v<DataT>
+    requires Consumer<ConsumerT> and std::is_trivially_copyable_v<DataT>
 [[nodiscard]] auto dequeue(ConsumerT& consumer, DataT& data) -> bool {
-  auto buffer = consumer.fetch();
-  if (buffer.empty()) {
-    return false;
-  }
-  data = *std::bit_cast<DataT const*>(buffer.data());
-  consumer.consume();
-  return true;
+    auto buffer = consumer.fetch();
+    if (buffer.empty()) {
+        return false;
+    }
+    data = *std::bit_cast<DataT const*>(buffer.data());
+    consumer.consume();
+    return true;
 }
 
 template <typename ConsumerT, typename DataT>
-  requires Consumer<ConsumerT> and std::is_trivially_copyable_v<DataT>
+    requires Consumer<ConsumerT> and std::is_trivially_copyable_v<DataT>
 [[nodiscard]] auto fetch(ConsumerT& consumer, DataT& data) -> bool {
-  auto buffer = consumer.fetch();
-  if (buffer.empty()) {
-    return false;
-  }
-  data = *std::bit_cast<DataT const*>(buffer.data());
-  return true;
+    auto buffer = consumer.fetch();
+    if (buffer.empty()) {
+        return false;
+    }
+    data = *std::bit_cast<DataT const*>(buffer.data());
+    return true;
 }
 
 } // namespace turboq::testing

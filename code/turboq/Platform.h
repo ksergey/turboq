@@ -21,6 +21,6 @@
 namespace turboq {
 
 /// Cache line size
-static constexpr std::size_t kCacheLineSize = 64u;
+static constexpr std::size_t kCpuCacheLineSize = 64u;
 
 } // namespace turboq
