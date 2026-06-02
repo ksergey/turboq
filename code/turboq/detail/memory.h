@@ -9,9 +9,9 @@
 namespace turboq::detail {
 
 /// Map file to memory
-MappedRegion mapFile(File const& file, std::size_t fileSize);
+[[nodiscard]] auto mapFile(File const& file, std::size_t fileSize) -> MappedRegion;
 
 /// \overload
-MappedRegion mapFile(File const& file);
+[[nodiscard]] auto mapFile(File const& file) -> MappedRegion;
 
 } // namespace turboq::detail

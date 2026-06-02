@@ -11,13 +11,13 @@ namespace turboq::detail {
 
 template <typename T>
     requires std::integral<T>
-[[nodiscard]] constexpr T upper_pow_2(T value) noexcept {
+[[nodiscard]] constexpr auto upper_pow_2(T value) noexcept -> T {
     return std::bit_ceil<T>(value);
 }
 
 template <typename T>
     requires std::integral<T>
-[[nodiscard]] constexpr T align_up(T value, T align) noexcept {
+[[nodiscard]] constexpr auto align_up(T value, T align) noexcept -> T {
     return ((value + align - 1) / align) * align;
 }
 

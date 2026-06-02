@@ -31,8 +31,8 @@ class File {
 private:
     static constexpr int kInvalidFd = -1;
 
-    int fd_ = kInvalidFd;
-    bool owns_ = false;
+    int fd_{kInvalidFd};
+    bool owns_{false};
 
 public:
     File(File const&) = delete;
@@ -40,13 +40,13 @@ public:
 
     File() = default;
 
-    File(File&& other) noexcept : fd_(other.fd_), owns_(other.owns_) {
+    File(File&& other) noexcept : fd_{other.fd_}, owns_{other.owns_} {
         other.release();
     }
 
     File& operator=(File&& other) noexcept {
-        [[maybe_unused]] auto const result = closeNoThrow();
-        swap(other);
+        [[maybe_unused]] auto const result = this->closeNoThrow();
+        this->swap(other);
         return *this;
     }
 
@@ -64,7 +64,7 @@ public:
 
     /// Construct from raw descritor.
     /// Become fd owner on owns set to true.
-    explicit File(int fd, bool owns = false) noexcept : fd_(fd), owns_(owns) {}
+    explicit File(int fd, bool owns = false) noexcept : fd_{fd}, owns_{owns} {}
 
     /// Return native descriptor.
     [[nodiscard]] auto get() const noexcept -> int {
@@ -141,7 +141,7 @@ public:
 
 protected:
     void reset(int fd, bool owns) noexcept {
-        [[maybe_unused]] auto const result = closeNoThrow();
+        [[maybe_unused]] auto const result = this->closeNoThrow();
         fd_ = fd;
         owns_ = owns;
     }

@@ -68,7 +68,7 @@ struct BoundedMPSCRawQueueDetail {
     }
 
     /// Offset for the first message header from memory buffer start
-    static constexpr std::size_t kDataStartPos = alignBufferSize(sizeof(MemoryHeader));
+    static constexpr std::size_t kDataStartPos{alignBufferSize(sizeof(MemoryHeader))};
 
     /// Check buffer points to valid SPMC queue region
     /// Return true on success and false otherwise.
@@ -102,11 +102,11 @@ private:
     using StateHeader = typename QueueDetail::StateHeader;
 
     MappedRegion storage_;
-    MemoryHeader* header_ = nullptr;
+    MemoryHeader* header_{nullptr};
     std::span<std::byte> data_;
     std::span<StateHeader> commitStates_;
-    std::size_t producerPosCache_ = 0;
-    std::size_t consumerPosCache_ = 0;
+    std::size_t producerPosCache_{0};
+    std::size_t consumerPosCache_{0};
 
 public:
     BoundedMPSCRawQueueProducer() = default;
@@ -121,11 +121,11 @@ public:
         return *this;
     }
 
-    BoundedMPSCRawQueueProducer(MappedRegion&& storage) : storage_(std::move(storage)) {
+    BoundedMPSCRawQueueProducer(MappedRegion&& storage) : storage_{std::move(storage)} {
         auto content = storage_.content();
 
         if (!QueueDetail::check(content)) {
-            throw std::runtime_error("invalid queue");
+            throw std::runtime_error{"invalid queue"};
         }
 
         header_ = std::bit_cast<MemoryHeader*>(storage_.data());
@@ -164,8 +164,8 @@ public:
     [[nodiscard]] TURBOQ_FORCE_INLINE auto prepare(std::size_t size) -> std::span<std::byte> {
         std::size_t const totalSize = size + sizeof(MessageHeader);
         if (totalSize > header_->maxMessageSize) [[unlikely]] {
-            throw std::runtime_error(
-                std::format("buffer exceed max message size ({} > {})", totalSize, header_->maxMessageSize));
+            throw std::runtime_error{
+                std::format("buffer exceed max message size ({} > {})", totalSize, header_->maxMessageSize)};
         }
 
         std::size_t currentProducerPos = std::atomic_ref(header_->producerPos).load(std::memory_order_acquire);
@@ -204,7 +204,7 @@ public:
         } else {
             assert(false);
         }
-        commit();
+        this->commit();
     }
 
     /// Swap resources with other producer
@@ -234,13 +234,13 @@ private:
     using StateHeader = typename QueueDetail::StateHeader;
 
     MappedRegion storage_;
-    MemoryHeader* header_ = nullptr;
+    MemoryHeader* header_{nullptr};
     std::span<std::byte> data_;
     std::span<StateHeader> commitStates_;
-    std::size_t producerPosCache_ = 0;
-    std::size_t consumerPosCache_ = 0;
-    MessageHeader* lastMessageHeader_ = nullptr;
-    StateHeader* lastCommitState_ = nullptr;
+    std::size_t producerPosCache_{0};
+    std::size_t consumerPosCache_{0};
+    MessageHeader* lastMessageHeader_{nullptr};
+    StateHeader* lastCommitState_{nullptr};
 
 public:
     BoundedMPSCRawQueueConsumer() = default;
@@ -255,11 +255,11 @@ public:
         return *this;
     }
 
-    BoundedMPSCRawQueueConsumer(MappedRegion&& storage) : storage_(std::move(storage)) {
+    BoundedMPSCRawQueueConsumer(MappedRegion&& storage) : storage_{std::move(storage)} {
         auto content = storage_.content();
 
         if (!QueueDetail::check(content)) {
-            throw std::runtime_error("invalid queue");
+            throw std::runtime_error{"invalid queue"};
         }
 
         header_ = std::bit_cast<MemoryHeader*>(storage_.data());
@@ -399,32 +399,32 @@ public:
     }
 
     /// Open only queue. Throws on error.
-    BoundedMPSCRawQueueImpl(std::string_view name, MemorySource const& memorySource = DefaultMemorySource()) {
+    BoundedMPSCRawQueueImpl(std::string_view name, MemorySource const& memorySource = DefaultMemorySource{}) {
         auto result = memorySource.open(name, MemorySource::OpenOnly);
         if (!result) {
-            throw std::runtime_error("failed to open memory source");
+            throw std::runtime_error{"failed to open memory source"};
         }
 
         std::size_t pageSize;
         std::tie(file_, pageSize) = std::move(result).value();
 
         if (auto storage = detail::mapFile(file_); !QueueDetail::check(storage.content())) {
-            throw std::runtime_error("failed to open queue (invalid)");
+            throw std::runtime_error{"failed to open queue (invalid)"};
         }
     }
 
     /// Open or create queue. Throws on error.
     BoundedMPSCRawQueueImpl(std::string_view name, CreationOptions const& options,
-        MemorySource const& memorySource = DefaultMemorySource()) {
+        MemorySource const& memorySource = DefaultMemorySource{}) {
         if (options.maxMessageSizeHint == 0) {
-            throw std::runtime_error("invalid argument (max message size)");
+            throw std::runtime_error{"invalid argument (max message size)"};
         }
         if (options.lengthHint == 0) {
-            throw std::runtime_error("invalid argument (length)");
+            throw std::runtime_error{"invalid argument (length)"};
         }
         auto result = memorySource.open(name, MemorySource::OpenOrCreate);
         if (!result) {
-            throw std::runtime_error("failed to open memory source");
+            throw std::runtime_error{"failed to open memory source"};
         }
 
         std::size_t pageSize;
@@ -440,10 +440,10 @@ public:
         // init queue or check queue's options is the same as requested
         if (auto const fileSize = file_.getFileSize(); fileSize != 0) {
             if (fileSize != capacity) {
-                throw std::runtime_error("size mismatch");
+                throw std::runtime_error{"size mismatch"};
             }
             if (auto storage = detail::mapFile(file_); !QueueDetail::check(storage.content())) {
-                throw std::runtime_error("failed to open queue (invalid)");
+                throw std::runtime_error{"failed to open queue (invalid)"};
             }
         } else {
             file_.truncate(capacity);
@@ -459,20 +459,20 @@ public:
     /// Create producer for the queue. Throws on error.
     [[nodiscard]] TURBOQ_FORCE_INLINE auto createProducer() -> Producer {
         if (!operator bool()) {
-            throw std::runtime_error("queue in not initialized");
+            throw std::runtime_error{"queue in not initialized"};
         }
-        return Producer(detail::mapFile(file_));
+        return Producer{detail::mapFile(file_)};
     }
 
     /// Create consumer for the queue. Throws on error.
     [[nodiscard]] TURBOQ_FORCE_INLINE auto createConsumer() -> Consumer {
         if (!operator bool()) {
-            throw std::runtime_error("queue in not initialized");
+            throw std::runtime_error{"queue in not initialized"};
         }
         if (!file_.tryLock()) {
-            throw std::runtime_error("can't create consumer (already exists?)");
+            throw std::runtime_error{"can't create consumer (already exists?)"};
         }
-        return Consumer(detail::mapFile(file_));
+        return Consumer{detail::mapFile(file_)};
     }
 
     /// Swap resources with other queue.

@@ -12,8 +12,8 @@ namespace turboq {
 
 class MappedRegion {
 private:
-    std::byte* data_ = nullptr;
-    std::size_t size_ = 0;
+    std::byte* data_{nullptr};
+    std::size_t size_{0};
 
 public:
     MappedRegion(MappedRegion const&) = delete;
@@ -35,7 +35,7 @@ public:
 
     /// Construct mapped region from pointer to data and size. Own early mapped
     /// region with mmap.
-    MappedRegion(std::byte* data, std::size_t size) noexcept : data_(data), size_(size) {}
+    MappedRegion(std::byte* data, std::size_t size) noexcept : data_{data}, size_{size} {}
 
     /// Destructor. Unmap mmaped memory if owns it.
     virtual ~MappedRegion() noexcept;

@@ -11,8 +11,8 @@
 
 #include <benchmark/benchmark.h>
 
+#include "BoundedBroadcastRawQueue.h"
 #include "BoundedMPSCRawQueue.h"
-#include "BoundedSPMCRawQueue.h"
 #include "BoundedSPSCRawQueue.h"
 #include "TestUtils.h"
 
@@ -26,9 +26,10 @@ struct Traits {
 };
 
 template <std::size_t SegmentSize>
-struct SPMCQueue : BoundedSPMCRawQueueImpl<Traits<SegmentSize>> {
+struct SPMCQueue : BoundedBroadcastRawQueueImpl<Traits<SegmentSize>> {
     SPMCQueue()
-        : BoundedSPMCRawQueueImpl<Traits<SegmentSize>>("bm", {10 * std::size_t(1 << 20)}, AnonymousMemorySource()) {}
+        : BoundedBroadcastRawQueueImpl<Traits<SegmentSize>>(
+              "bm", {10 * std::size_t(1 << 20)}, AnonymousMemorySource()) {}
 };
 
 template <std::size_t SegmentSize>
@@ -44,7 +45,7 @@ struct MPSCQueue : BoundedMPSCRawQueueImpl<Traits<SegmentSize>> {
               "bm", {std::size_t(sizeof(std::uint64_t)), 10 * std::size_t(1 << 10)}, AnonymousMemorySource()) {}
 };
 
-static void ApplyCustomArgs(::benchmark::internal::Benchmark* b) {
+static void ApplyCustomArgs(::benchmark::Benchmark* b) {
     b->MeasureProcessCPUTime();
     b->UseRealTime();
 }

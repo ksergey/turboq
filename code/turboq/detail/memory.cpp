@@ -9,15 +9,15 @@
 
 namespace turboq::detail {
 
-MappedRegion mapFile(File const& file, std::size_t fileSize) {
+auto mapFile(File const& file, std::size_t fileSize) -> MappedRegion {
     auto region = ::mmap(nullptr, fileSize, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_POPULATE, file.get(), 0);
     if (region == MAP_FAILED) {
-        throw std::system_error(errno, getPosixErrorCategory(), "mmap(...)");
+        throw std::system_error{errno, getPosixErrorCategory(), "mmap(...)"};
     }
-    return MappedRegion(static_cast<std::byte*>(region), fileSize);
+    return MappedRegion{static_cast<std::byte*>(region), fileSize};
 }
 
-MappedRegion mapFile(File const& file) {
+auto mapFile(File const& file) -> MappedRegion {
     return mapFile(file, file.getFileSize());
 }
 

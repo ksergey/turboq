@@ -14,13 +14,13 @@ private:
     static_assert(std::is_nothrow_move_constructible_v<Fn>);
 
     [[no_unique_address]] Fn fn_;
-    bool released_ = false;
+    bool released_{false};
 
 public:
-    ScopeGuard(Fn&& fn) noexcept : fn_((Fn&&)fn) {}
+    ScopeGuard(Fn&& fn) noexcept : fn_{(Fn&&)fn} {}
 
     ~ScopeGuard() noexcept {
-        reset();
+        this->reset();
     }
 
     void release() noexcept {
