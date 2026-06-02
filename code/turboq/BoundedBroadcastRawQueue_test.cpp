@@ -6,14 +6,14 @@
 
 #include <doctest/doctest.h>
 
-#include "BoundedSPMCRawQueue.h"
+#include "BoundedBroadcastRawQueue.h"
 #include "TestUtils.h"
 
 namespace turboq::testing {
 
-TEST_CASE("BoundedSPMCRawQueue: basic") {
-    BoundedSPMCRawQueue queue(
-        "test", BoundedSPMCRawQueue::CreationOptions(sizeof(std::uint64_t) * 100), AnonymousMemorySource());
+TEST_CASE("BoundedBroadcastRawQueue: basic") {
+    BoundedBroadcastRawQueue queue(
+        "test", BoundedBroadcastRawQueue::CreationOptions{sizeof(std::uint64_t) * 100}, AnonymousMemorySource{});
 
     auto producer = queue.createProducer();
     REQUIRE(producer);

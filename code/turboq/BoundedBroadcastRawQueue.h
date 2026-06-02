@@ -23,7 +23,7 @@ namespace detail {
 
 /// SPMC queue detail
 template <typename Traits>
-struct BoundedSPMCRawQueueDetail {
+struct BoundedBroadcastRawQueueDetail {
     /// Queue tag
     static constexpr std::string_view kTag = Traits::kTag;
     /// Segment size
@@ -51,15 +51,15 @@ struct BoundedSPMCRawQueueDetail {
     static_assert(std::is_trivially_copyable_v<MessageHeader>);
 
     /// Align message buffer size
-    static constexpr auto alignBufferSize(std::size_t value) noexcept -> std::size_t {
+    [[nodiscard]] static constexpr auto alignBufferSize(std::size_t value) noexcept -> std::size_t {
         return detail::align_up(value, kSegmentSize);
     }
 
     /// Offset for the first message header from memory buffer start
-    static constexpr std::size_t kDataStartPos = alignBufferSize(sizeof(MemoryHeader));
+    static constexpr std::size_t kDataStartPos{alignBufferSize(sizeof(MemoryHeader))};
 
     /// Min buffer size
-    static constexpr std::size_t kMinBufferSize = kDataStartPos + 2 * kSegmentSize;
+    static constexpr std::size_t kMinBufferSize{kDataStartPos + 2 * kSegmentSize};
 
     /// Check buffer points to valid SPMC queue region
     /// Return true on success and false otherwise.
@@ -83,36 +83,36 @@ struct BoundedSPMCRawQueueDetail {
 
 /// Implements a SPMC queue producer
 template <typename Traits>
-class BoundedSPMCRawQueueProducer {
+class BoundedBroadcastRawQueueProducer {
 private:
-    using QueueDetail = BoundedSPMCRawQueueDetail<Traits>;
+    using QueueDetail = BoundedBroadcastRawQueueDetail<Traits>;
     using MemoryHeader = typename QueueDetail::MemoryHeader;
     using MessageHeader = typename QueueDetail::MessageHeader;
 
     MappedRegion storage_;
     std::span<std::byte> data_;
-    MemoryHeader* header_ = nullptr;
-    std::size_t producerPosCache_ = 0;
-    MessageHeader* lastMessageHeader_ = nullptr;
+    MemoryHeader* header_{nullptr};
+    std::size_t producerPosCache_{0};
+    MessageHeader* lastMessageHeader_{nullptr};
 
 public:
-    BoundedSPMCRawQueueProducer() = default;
-    ~BoundedSPMCRawQueueProducer() = default;
+    BoundedBroadcastRawQueueProducer() = default;
+    ~BoundedBroadcastRawQueueProducer() = default;
 
-    BoundedSPMCRawQueueProducer(BoundedSPMCRawQueueProducer&& that) noexcept {
+    BoundedBroadcastRawQueueProducer(BoundedBroadcastRawQueueProducer&& that) noexcept {
         swap(that);
     }
 
-    BoundedSPMCRawQueueProducer& operator=(BoundedSPMCRawQueueProducer&& that) noexcept {
+    BoundedBroadcastRawQueueProducer& operator=(BoundedBroadcastRawQueueProducer&& that) noexcept {
         swap(that);
         return *this;
     }
 
-    BoundedSPMCRawQueueProducer(MappedRegion&& storage) : storage_(std::move(storage)) {
+    BoundedBroadcastRawQueueProducer(MappedRegion&& storage) : storage_{std::move(storage)} {
         auto content = storage_.content();
 
         if (!QueueDetail::check(content)) {
-            throw std::runtime_error("invalid queue");
+            throw std::runtime_error{"invalid queue"};
         }
 
         header_ = std::bit_cast<MemoryHeader*>(storage_.data());
@@ -166,11 +166,11 @@ public:
         } else {
             assert(false);
         }
-        commit();
+        this->commit();
     }
 
     /// Swap resources with other producer
-    void swap(BoundedSPMCRawQueueProducer& that) noexcept {
+    void swap(BoundedBroadcastRawQueueProducer& that) noexcept {
         using std::swap;
         swap(storage_, that.storage_);
         swap(data_, that.data_);
@@ -179,45 +179,45 @@ public:
         swap(lastMessageHeader_, that.lastMessageHeader_);
     }
 
-    /// \see BoundedSPMCRawQueueProducer::swap
-    friend void swap(BoundedSPMCRawQueueProducer& a, BoundedSPMCRawQueueProducer& b) noexcept {
+    /// \see BoundedBroadcastRawQueueProducer::swap
+    friend void swap(BoundedBroadcastRawQueueProducer& a, BoundedBroadcastRawQueueProducer& b) noexcept {
         a.swap(b);
     }
 };
 
 /// Implements a SPMC queue consumer
 template <typename Traits>
-class BoundedSPMCRawQueueConsumer {
+class BoundedBroadcastRawQueueConsumer {
 private:
-    using QueueDetail = BoundedSPMCRawQueueDetail<Traits>;
+    using QueueDetail = BoundedBroadcastRawQueueDetail<Traits>;
     using MemoryHeader = typename QueueDetail::MemoryHeader;
     using MessageHeader = typename QueueDetail::MessageHeader;
 
     MappedRegion storage_;
     std::span<std::byte> data_;
-    MemoryHeader* header_ = nullptr;
-    std::size_t consumerPosCache_ = 0;
-    std::size_t producerPosCache_ = 0;
-    MessageHeader* lastMessageHeader_ = nullptr;
+    MemoryHeader* header_{nullptr};
+    std::size_t consumerPosCache_{0};
+    std::size_t producerPosCache_{0};
+    MessageHeader* lastMessageHeader_{nullptr};
 
 public:
-    BoundedSPMCRawQueueConsumer() = default;
-    ~BoundedSPMCRawQueueConsumer() = default;
+    BoundedBroadcastRawQueueConsumer() = default;
+    ~BoundedBroadcastRawQueueConsumer() = default;
 
-    BoundedSPMCRawQueueConsumer(BoundedSPMCRawQueueConsumer&& that) noexcept {
+    BoundedBroadcastRawQueueConsumer(BoundedBroadcastRawQueueConsumer&& that) noexcept {
         swap(that);
     }
 
-    BoundedSPMCRawQueueConsumer& operator=(BoundedSPMCRawQueueConsumer&& that) noexcept {
+    BoundedBroadcastRawQueueConsumer& operator=(BoundedBroadcastRawQueueConsumer&& that) noexcept {
         swap(that);
         return *this;
     }
 
-    BoundedSPMCRawQueueConsumer(MappedRegion&& storage) : storage_(std::move(storage)) {
+    BoundedBroadcastRawQueueConsumer(MappedRegion&& storage) : storage_{std::move(storage)} {
         auto content = storage_.content();
 
         if (!QueueDetail::check(content)) {
-            throw std::runtime_error("invalid queue");
+            throw std::runtime_error{"invalid queue"};
         }
 
         header_ = std::bit_cast<MemoryHeader*>(content.data());
@@ -261,7 +261,7 @@ public:
     }
 
     /// Swap resources with other object
-    void swap(BoundedSPMCRawQueueConsumer& that) noexcept {
+    void swap(BoundedBroadcastRawQueueConsumer& that) noexcept {
         using std::swap;
         swap(storage_, that.storage_);
         swap(data_, that.data_);
@@ -271,8 +271,8 @@ public:
         swap(lastMessageHeader_, that.lastMessageHeader_);
     }
 
-    /// \see BoundedSPMCRawQueueConsumer::swap
-    friend void swap(BoundedSPMCRawQueueConsumer& a, BoundedSPMCRawQueueConsumer& b) noexcept {
+    /// \see BoundedBroadcastRawQueueConsumer::swap
+    friend void swap(BoundedBroadcastRawQueueConsumer& a, BoundedBroadcastRawQueueConsumer& b) noexcept {
         a.swap(b);
     }
 };
@@ -289,67 +289,67 @@ public:
 /// xxx - padding bytes
 /// uuu - unused bytes
 template <typename Traits>
-class BoundedSPMCRawQueueImpl;
+class BoundedBroadcastRawQueueImpl;
 
-struct BoundedSPMCRawQueueDefaultTraits {
+struct BoundedBroadcastRawQueueDefaultTraits {
     static constexpr std::string_view kTag = "turboq/SPMC";
     static constexpr std::size_t kSegmentSize = kCpuCacheLineSize;
     static constexpr std::size_t kAlign = kCpuCacheLineSize;
 };
 
-using BoundedSPMCRawQueue = BoundedSPMCRawQueueImpl<BoundedSPMCRawQueueDefaultTraits>;
+using BoundedBroadcastRawQueue = BoundedBroadcastRawQueueImpl<BoundedBroadcastRawQueueDefaultTraits>;
 
 template <typename Traits>
-class BoundedSPMCRawQueueImpl {
+class BoundedBroadcastRawQueueImpl {
 private:
-    using QueueDetail = detail::BoundedSPMCRawQueueDetail<Traits>;
+    using QueueDetail = detail::BoundedBroadcastRawQueueDetail<Traits>;
     using MemoryHeader = typename QueueDetail::MemoryHeader;
     using MessageHeader = typename QueueDetail::MessageHeader;
 
     File file_;
 
 public:
-    using Producer = detail::BoundedSPMCRawQueueProducer<Traits>;
-    using Consumer = detail::BoundedSPMCRawQueueConsumer<Traits>;
+    using Producer = detail::BoundedBroadcastRawQueueProducer<Traits>;
+    using Consumer = detail::BoundedBroadcastRawQueueConsumer<Traits>;
 
     struct CreationOptions {
         std::size_t capacityHint;
     };
 
-    BoundedSPMCRawQueueImpl(BoundedSPMCRawQueueImpl const&) = delete;
-    BoundedSPMCRawQueueImpl& operator=(BoundedSPMCRawQueueImpl const&) = delete;
-    BoundedSPMCRawQueueImpl() = default;
+    BoundedBroadcastRawQueueImpl(BoundedBroadcastRawQueueImpl const&) = delete;
+    BoundedBroadcastRawQueueImpl& operator=(BoundedBroadcastRawQueueImpl const&) = delete;
+    BoundedBroadcastRawQueueImpl() = default;
 
-    BoundedSPMCRawQueueImpl(BoundedSPMCRawQueueImpl&& that) noexcept {
+    BoundedBroadcastRawQueueImpl(BoundedBroadcastRawQueueImpl&& that) noexcept {
         swap(that);
     }
 
-    BoundedSPMCRawQueueImpl& operator=(BoundedSPMCRawQueueImpl&& that) noexcept {
+    BoundedBroadcastRawQueueImpl& operator=(BoundedBroadcastRawQueueImpl&& that) noexcept {
         swap(that);
         return *this;
     }
 
     /// Open only queue. Throws on error.
-    BoundedSPMCRawQueueImpl(std::string_view name, MemorySource const& memorySource = DefaultMemorySource()) {
+    BoundedBroadcastRawQueueImpl(std::string_view name, MemorySource const& memorySource = DefaultMemorySource{}) {
         auto result = memorySource.open(name, MemorySource::OpenOnly);
         if (!result) {
-            throw std::runtime_error("failed to open memory source");
+            throw std::runtime_error{"failed to open memory source"};
         }
 
         std::size_t pageSize;
         std::tie(file_, pageSize) = std::move(result).value();
 
         if (auto storage = detail::mapFile(file_); !QueueDetail::check(storage.content())) {
-            throw std::runtime_error("failed to open queue (invalid)");
+            throw std::runtime_error{"failed to open queue (invalid)"};
         }
     }
 
     /// Open or create queue. Throws on error.
-    BoundedSPMCRawQueueImpl(std::string_view name, CreationOptions const& options,
-        MemorySource const& memorySource = DefaultMemorySource()) {
+    BoundedBroadcastRawQueueImpl(std::string_view name, CreationOptions const& options,
+        MemorySource const& memorySource = DefaultMemorySource{}) {
         auto result = memorySource.open(name, MemorySource::OpenOrCreate);
         if (!result) {
-            throw std::runtime_error("failed to open memory source");
+            throw std::runtime_error{"failed to open memory source"};
         }
 
         std::size_t pageSize;
@@ -361,10 +361,10 @@ public:
         // init queue or check queue's options is the same as requested
         if (auto const fileSize = file_.getFileSize(); fileSize != 0) {
             if (fileSize != capacity) {
-                throw std::runtime_error("size mismatch");
+                throw std::runtime_error{"size mismatch"};
             }
             if (auto storage = detail::mapFile(file_); !QueueDetail::check(storage.content())) {
-                throw std::runtime_error("failed to open queue (invalid)");
+                throw std::runtime_error{"failed to open queue (invalid)"};
             }
         } else {
             file_.truncate(capacity);
@@ -380,30 +380,30 @@ public:
     /// Create producer for the queue. Throws on error.
     [[nodiscard]] TURBOQ_FORCE_INLINE auto createProducer() -> Producer {
         if (!operator bool()) {
-            throw std::runtime_error("queue not initialized");
+            throw std::runtime_error{"queue not initialized"};
         }
         if (!file_.tryLock()) {
-            throw std::runtime_error("can't create producer (already exists?)");
+            throw std::runtime_error{"can't create producer (already exists?)"};
         }
-        return Producer(detail::mapFile(file_));
+        return Producer{detail::mapFile(file_)};
     }
 
     /// Create consumer for the queue. Throws on error.
     [[nodiscard]] TURBOQ_FORCE_INLINE auto createConsumer() -> Consumer {
         if (!operator bool()) {
-            throw std::runtime_error("queue not initialized");
+            throw std::runtime_error{"queue not initialized"};
         }
-        return Consumer(detail::mapFile(file_));
+        return Consumer{detail::mapFile(file_)};
     }
 
     /// Swap resources with other queue.
-    void swap(BoundedSPMCRawQueueImpl& that) noexcept {
+    void swap(BoundedBroadcastRawQueueImpl& that) noexcept {
         using std::swap;
         swap(file_, that.file_);
     }
 
-    /// \see BoundedSPMCRawQueueImpl::swap
-    friend void swap(BoundedSPMCRawQueueImpl& a, BoundedSPMCRawQueueImpl& b) noexcept {
+    /// \see BoundedBroadcastRawQueueImpl::swap
+    friend void swap(BoundedBroadcastRawQueueImpl& a, BoundedBroadcastRawQueueImpl& b) noexcept {
         a.swap(b);
     }
 };

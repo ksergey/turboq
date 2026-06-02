@@ -14,12 +14,12 @@ struct PosixErrorCategory final : public std::error_category {
     constexpr PosixErrorCategory() noexcept = default;
 
     /// \see std::error_category
-    auto name() const noexcept -> char const* override {
+    [[nodiscard]] auto name() const noexcept -> char const* override {
         return "PosixError";
     }
 
     /// \see std::error_category
-    auto message(int error) const -> std::string override {
+    [[nodiscard]] auto message(int error) const -> std::string override {
         return strerror(error);
     }
 };
