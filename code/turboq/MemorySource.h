@@ -47,6 +47,11 @@ public:
     /// Throws on error
     DefaultMemorySource(std::filesystem::path const& path, std::size_t pageSize);
 
+    /// Path where shared files will be created
+    [[nodiscard]] auto path() const noexcept -> std::filesystem::path const& {
+        return path_;
+    }
+
     /// \see MemorySource::open
     [[nodiscard]] auto open(std::string_view name, OpenFlags flags) const noexcept
         -> std::expected<std::tuple<File, std::size_t>, std::error_code> override;
