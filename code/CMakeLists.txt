@@ -17,7 +17,7 @@ if (TURBOQ_PYTHON)
     PROPERTY POSITION_INDEPENDENT_CODE ON)
 endif()
 
-if (TURBOQ_SANITIZER)
+if (turboq_SANITIZER)
   target_compile_options(${TargetName}
     PUBLIC -fsanitize=address,leak,undefined)
   target_link_options(${TargetName}
