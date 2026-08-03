@@ -11,26 +11,27 @@
 #include <bit>
 #include <cassert>
 #include <charconv>
-#include <print>
+#include <cstdio>
 #include <ranges>
 #include <regex>
 #include <string_view>
 #include <system_error>
 #include <vector>
 
+#include "Error.h"
 #include "ScopeGuard.h"
 
 namespace turboq {
 namespace {
 
-std::size_t const gDefaultPageSize = ::sysconf(_SC_PAGESIZE);
-constexpr std::size_t gPageSize2M = 2 * 1024 * 1024;
-constexpr std::size_t gPageSize1G = 1 * 1024 * 1024 * 1024;
+std::size_t const gDefaultPageSize{static_cast<std::size_t>(::sysconf(_SC_PAGESIZE))};
+constexpr std::size_t gPageSize2M{2 * 1024 * 1024};
+constexpr std::size_t gPageSize1G{1 * 1024 * 1024 * 1024};
 
 auto getDefaultHugePageSize() noexcept -> std::expected<std::size_t, std::error_code> {
     using namespace std::string_view_literals;
 
-    static auto const regex = std::regex(R"!(Hugepagesize:\s*(\d+)\s*kB)!");
+    static auto const regex = std::regex{R"!(Hugepagesize:\s*(\d+)\s*kB)!"};
 
     auto handle = ::fopen("/proc/meminfo", "r");
     if (!handle) {
@@ -40,17 +41,17 @@ auto getDefaultHugePageSize() noexcept -> std::expected<std::size_t, std::error_
     char* line = nullptr;
     std::size_t len = 0;
 
-    ScopeGuard guard([&]() noexcept {
+    ScopeGuard guard{[&]() noexcept {
         ::fclose(handle);
         if (line) {
             ::free(line);
         }
-    });
+    }};
 
     std::cmatch match;
 
     while (::getline(&line, &len, handle) != -1) {
-        auto input = std::string_view(line, ::strlen(line) - 1);
+        auto input = std::string_view{line, ::strlen(line) - 1};
 
         if (!std::regex_match(input.begin(), input.end(), match, regex)) {
             continue;
@@ -71,7 +72,7 @@ auto getDefaultHugePageSize() noexcept -> std::expected<std::size_t, std::error_
 auto getPageSizeFromMountOpts(std::string_view opts) noexcept -> std::expected<std::size_t, std::error_code> {
     using namespace std::string_view_literals;
 
-    for (auto const word : std::views::split(std::string_view(opts), ","sv)) {
+    for (auto const word : std::views::split(std::string_view{opts}, ","sv)) {
         auto const option = std::string_view(std::ranges::data(word), std::ranges::size(word));
         if (!option.starts_with("pagesize="sv)) {
             continue;
@@ -99,12 +100,12 @@ auto readProcMounts() -> std::vector<MemoryMountPoint> {
 
     auto handle = ::setmntent("/proc/mounts", "r");
     if (!handle) {
-        throw std::system_error(ENOENT, getPosixErrorCategory(), "setmntent(...)");
+        throw std::system_error{makePosixErrorCode(ENOENT), "setmntent(...)"};
     }
 
-    ScopeGuard guard([&]() noexcept {
+    ScopeGuard guard{[&]() noexcept {
         ::endmntent(handle);
-    });
+    }};
 
     std::vector<MemoryMountPoint> entries;
 
@@ -127,8 +128,8 @@ auto readProcMounts() -> std::vector<MemoryMountPoint> {
                 if (defaultHugePageSize) {
                     pageSize = defaultHugePageSize;
                 } else {
-                    std::print(stderr, "turboq: pagesize option error for mount point \"{}\" ({}): {}\n",
-                        mntent.mnt_dir, mntent.mnt_fsname, pageSize.error().message());
+                    std::fprintf(stderr, "turboq: pagesize option error for mount point \"%s\" (%s): %s\n",
+                        mntent.mnt_dir, mntent.mnt_fsname, pageSize.error().message().c_str());
                     continue;
                 }
             }
@@ -237,12 +238,12 @@ DefaultMemorySource::DefaultMemorySource(HugePagesOption hugePagesOpt) {
         result = getMountEntry1G(getProcMounts());
     } break;
     default: {
-        throw std::system_error(EINVAL, getPosixErrorCategory(), "Invalid hugePagesOpt value");
+        throw std::system_error(EINVAL, getPosixErrorCategory(), "invalid hugePagesOpt value");
     } break;
     }
 
     if (!result) {
-        throw std::system_error(result.error());
+        throw std::system_error{result.error()};
     }
 
     path_ = result.value().path;
@@ -250,12 +251,12 @@ DefaultMemorySource::DefaultMemorySource(HugePagesOption hugePagesOpt) {
 }
 
 DefaultMemorySource::DefaultMemorySource(std::filesystem::path const& path, std::size_t pageSize)
-    : path_(path), pageSize_(pageSize) {
-    if (!std::filesystem::exists(path)) {
-        throw std::system_error(ENOENT, getPosixErrorCategory(), "Directory not exists");
+    : path_{path}, pageSize_{pageSize} {
+    if (!std::filesystem::exists(path_)) {
+        throw std::system_error{makePosixErrorCode(ENOENT), "directory not exists"};
     }
-    if (!std::has_single_bit(pageSize)) {
-        throw std::system_error(EINVAL, getPosixErrorCategory(), "Page size must be power of two");
+    if (!std::has_single_bit(pageSize_)) {
+        throw std::system_error{makePosixErrorCode(EINVAL), "page size must be power of two"};
     }
 }
 
@@ -265,21 +266,20 @@ auto DefaultMemorySource::open(std::string_view name, OpenFlags flags) const noe
         return std::unexpected(makePosixErrorCode(EINVAL));
     }
 
-    try {
-        auto const filePath = path_ / name;
-        auto file = (flags == OpenFlags::OpenOnly) ? File(kOpenOnly, filePath, OpenMode::ReadWrite)
-                                                   : File(kOpenOrCreate, filePath, OpenMode::ReadWrite);
-        return {std::make_tuple(std::move(file), pageSize_)};
-    } catch (...) {
-        return std::unexpected(makePosixErrorCode(EFAULT));
+    auto const filePath = path_ / name;
+    auto result = (flags == OpenFlags::OpenOnly) ? File::makeFile(kOpenOnly, filePath, OpenMode::ReadWrite)
+                                                 : File::makeFile(kOpenOrCreate, filePath, OpenMode::ReadWrite);
+    if (!result) {
+        return std::unexpected(result.error());
     }
+    return {std::make_tuple(std::move(result).value(), pageSize_)};
 }
 
 auto AnonymousMemorySource::open(std::string_view name, [[maybe_unused]] OpenFlags flags) const noexcept
     -> std::expected<std::tuple<File, std::size_t>, std::error_code> {
-    auto result = File::anonymous(std::string(name).c_str());
+    auto result = File::anonymous(std::string{name}.c_str());
     if (!result) {
-        return std::unexpected(makePosixErrorCode(result.error().value()));
+        return std::unexpected(result.error());
     }
     return {std::make_tuple(std::move(result).value(), gDefaultPageSize)};
 }

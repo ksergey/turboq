@@ -344,8 +344,8 @@ class BoundedSPSCRawQueueImpl;
 
 struct BoundedSPSCRawQueueDefaultTraits {
     static constexpr std::string_view kTag = "turboq/SPSC";
-    static constexpr std::size_t kSegmentSize = kCpuCacheLineSize;
-    static constexpr std::size_t kAlign = kCpuCacheLineSize;
+    static constexpr std::size_t kSegmentSize = kCacheLineSize;
+    static constexpr std::size_t kAlign = kCacheLineSize;
 };
 
 using BoundedSPSCRawQueue = BoundedSPSCRawQueueImpl<BoundedSPSCRawQueueDefaultTraits>;

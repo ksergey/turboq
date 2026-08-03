@@ -7,8 +7,6 @@
 #include <filesystem>
 #include <utility>
 
-#include "PosixError.h"
-
 namespace turboq {
 
 /// Create only tag.
@@ -40,23 +38,23 @@ public:
 
     File() = default;
 
-    File(File&& other) noexcept : fd_{other.fd_}, owns_{other.owns_} {
-        other.release();
-    }
+    File(File&& other) noexcept : fd_{std::exchange(other.fd_, kInvalidFd)}, owns_{std::exchange(other.owns_, false)} {}
 
     File& operator=(File&& other) noexcept {
-        [[maybe_unused]] auto const result = this->closeNoThrow();
-        this->swap(other);
+        if (this != &other) {
+            this->~File();
+            new (this) File{std::move(other)};
+        }
         return *this;
     }
 
-    /// Open file. Throws on open error.
+    /// Open file, throws std::system_error on error.
     File(OpenOnly, std::filesystem::path const& path, OpenMode openMode = OpenMode::ReadOnly);
 
-    /// Create file if not exists. Throws on error.
+    /// Create file, throws std::system_error on error.
     File(CreateOnly, std::filesystem::path const& path, OpenMode openMode = OpenMode::ReadOnly, mode_t mode = 0666);
 
-    /// Create file if not exists or open otherwise. Throws on error.
+    /// Open or create file, throws std::system_error on error.
     File(OpenOrCreate, std::filesystem::path const& path, OpenMode openMode = OpenMode::ReadOnly, mode_t mode = 0666);
 
     /// Destructor. Close file descriptor if owns it.
@@ -65,6 +63,16 @@ public:
     /// Construct from raw descritor.
     /// Become fd owner on owns set to true.
     explicit File(int fd, bool owns = false) noexcept : fd_{fd}, owns_{owns} {}
+
+    /// Exception safe constructors
+    template <typename... Args>
+    static auto makeFile(Args&&... args) noexcept -> std::expected<File, std::error_code> {
+        try {
+            return {File{std::forward<Args>(args)...}};
+        } catch (std::system_error const& e) {
+            return std::unexpected(e.code());
+        }
+    }
 
     /// Return native descriptor.
     [[nodiscard]] auto get() const noexcept -> int {
@@ -126,18 +134,6 @@ public:
 
     /// Truncate file, throws on error
     void truncate(std::size_t size) const;
-
-    /// Swap descriptor with another.
-    void swap(File& other) noexcept {
-        using std::swap;
-        swap(fd_, other.fd_);
-        swap(owns_, other.owns_);
-    }
-
-    /// Swaps the descriptors and ownership.
-    friend void swap(File& lhs, File& rhs) noexcept {
-        lhs.swap(rhs);
-    }
 
 protected:
     void reset(int fd, bool owns) noexcept {

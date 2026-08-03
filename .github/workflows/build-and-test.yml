@@ -3,8 +3,8 @@ name: build-and-test
 on: [push]
 
 env:
-  CMAKE_VERSION: 3.29.2
-  NINJA_VERSION: 1.9.0
+    CMAKE_VERSION: 3.29.2
+    NINJA_VERSION: 1.9.0
 
 jobs:
   build:
@@ -15,7 +15,7 @@ jobs:
       matrix:
         build_type: [ 'Debug', 'Release' ]
         os: [ 'ubuntu-24.04' ]
-        compiler: [ 'gcc-14', 'clang-19', 'clang-20' ]
+        compiler: [ 'gcc-14', 'gcc-15', 'gcc-16', 'clang-20', 'clang-21', 'clang-22' ]
 
     steps:
       - uses: actions/checkout@v4
@@ -62,6 +62,30 @@ jobs:
           echo "CC=gcc-14" >> $GITHUB_ENV
           echo "CXX=g++-14" >> $GITHUB_ENV
 
+      - name: install gcc-15
+        id: install_gcc_15
+        if: matrix.compiler == 'gcc-15'
+        shell: bash
+        working-directory: ${{ env.HOME }}
+        run: |
+          sudo add-apt-repository ppa:ubuntu-toolchain-r/test -y
+          sudo apt update
+          sudo apt install -y g++-15 gcc-15
+          echo "CC=gcc-15" >> $GITHUB_ENV
+          echo "CXX=g++-15" >> $GITHUB_ENV
+
+      - name: install gcc-16
+        id: install_gcc_16
+        if: matrix.compiler == 'gcc-16'
+        shell: bash
+        working-directory: ${{ env.HOME }}
+        run: |
+          sudo add-apt-repository ppa:ubuntu-toolchain-r/test -y
+          sudo apt update
+          sudo apt install -y g++-16 gcc-16
+          echo "CC=gcc-16" >> $GITHUB_ENV
+          echo "CXX=g++-16" >> $GITHUB_ENV
+
       - name: install clang-19
         id: install_clang_19
         if: matrix.compiler == 'clang-19'
@@ -85,6 +109,30 @@ jobs:
           sudo ./llvm.sh 20
           echo "CC=clang-20" >> $GITHUB_ENV
           echo "CXX=clang++-20" >> $GITHUB_ENV
+
+      - name: install clang-21
+        id: install_clang_21
+        if: matrix.compiler == 'clang-21'
+        shell: bash
+        working-directory: ${{ env.HOME }}
+        run: |
+          curl -O -L https://apt.llvm.org/llvm.sh
+          chmod +x llvm.sh
+          sudo ./llvm.sh 21
+          echo "CC=clang-21" >> $GITHUB_ENV
+          echo "CXX=clang++-21" >> $GITHUB_ENV
+
+      - name: install clang-22
+        id: install_clang_22
+        if: matrix.compiler == 'clang-22'
+        shell: bash
+        working-directory: ${{ env.HOME }}
+        run: |
+          curl -O -L https://apt.llvm.org/llvm.sh
+          chmod +x llvm.sh
+          sudo ./llvm.sh 22
+          echo "CC=clang-22" >> $GITHUB_ENV
+          echo "CXX=clang++-22" >> $GITHUB_ENV
 
       - name: configure
         shell: cmake -P {0}

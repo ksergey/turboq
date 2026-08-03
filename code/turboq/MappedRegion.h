@@ -4,7 +4,10 @@
 #pragma once
 
 #include <cstddef>
+#include <expected>
 #include <span>
+#include <system_error>
+#include <utility>
 
 #include "File.h"
 
@@ -20,13 +23,15 @@ public:
     MappedRegion& operator=(MappedRegion const&) = delete;
 
     /// Move constructor.
-    MappedRegion(MappedRegion&& that) noexcept {
-        swap(that);
-    }
+    MappedRegion(MappedRegion&& other) noexcept
+        : data_{std::exchange(other.data_, nullptr)}, size_{std::exchange(other.size_, 0)} {}
 
     /// Move assignment.
-    MappedRegion& operator=(MappedRegion&& that) noexcept {
-        swap(that);
+    MappedRegion& operator=(MappedRegion&& other) noexcept {
+        if (this != &other) {
+            this->~MappedRegion();
+            new (this) MappedRegion{std::move(other)};
+        }
         return *this;
     }
 
@@ -37,8 +42,24 @@ public:
     /// region with mmap.
     MappedRegion(std::byte* data, std::size_t size) noexcept : data_{data}, size_{size} {}
 
+    /// Construct mapped region from file descriptor, throw std::system_error on error
+    explicit MappedRegion(File const& file);
+
+    /// \overload
+    MappedRegion(File const& file, std::size_t fileSize);
+
     /// Destructor. Unmap mmaped memory if owns it.
     virtual ~MappedRegion() noexcept;
+
+    /// Exception safe constructors
+    template <typename... Args>
+    static auto makeMappedRegion(Args&&... args) noexcept -> std::expected<MappedRegion, std::error_code> {
+        try {
+            return {MappedRegion{std::forward<Args>(args)...}};
+        } catch (std::system_error const& e) {
+            return std::unexpected(e.code());
+        }
+    }
 
     /// Return true if initialized.
     [[nodiscard]] explicit operator bool() const noexcept {

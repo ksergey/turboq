@@ -6,10 +6,10 @@
 #include <expected>
 #include <filesystem>
 #include <string_view>
+#include <system_error>
 #include <tuple>
 
 #include "File.h"
-#include "PosixError.h"
 
 namespace turboq {
 
@@ -21,11 +21,8 @@ struct MemorySource {
 
     /// Get file descriptor for mapping and page size to roundup
     /// \param[in] name is memory source name
-    [[nodiscard]] virtual auto open(
-        [[maybe_unused]] std::string_view name, [[maybe_unused]] OpenFlags flags) const noexcept
-        -> std::expected<std::tuple<File, std::size_t>, std::error_code> {
-        return std::unexpected(makePosixErrorCode(ENOSYS));
-    }
+    [[nodiscard]] virtual auto open(std::string_view name, OpenFlags flags) const noexcept
+        -> std::expected<std::tuple<File, std::size_t>, std::error_code> = 0;
 };
 
 /// HugePages option selector

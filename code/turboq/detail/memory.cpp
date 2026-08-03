@@ -7,6 +7,8 @@
 
 #include <system_error>
 
+#include "../Error.h"
+
 namespace turboq::detail {
 
 auto mapFile(File const& file, std::size_t fileSize) -> MappedRegion {
