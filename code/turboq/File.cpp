@@ -24,6 +24,8 @@ auto memfd_create(const char* name, unsigned int flags) -> int {
 #define MFD_CLOEXEC FD_CLOEXEC
 #endif
 
+#include "Error.h"
+
 namespace turboq {
 namespace {
 
