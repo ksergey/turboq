@@ -3,12 +3,16 @@
 
 #pragma once
 
+#include <algorithm>
 #include <atomic>
 #include <bit>
 #include <cassert>
 #include <span>
 #include <string_view>
+#include <type_traits>
+#include <utility>
 
+#include "Error.h"
 #include "MappedRegion.h"
 #include "MemorySource.h"
 #include "Platform.h"
@@ -17,8 +21,9 @@
 namespace turboq {
 namespace detail {
 
+template <typename Options>
 struct MulticastQueueDetail {
-    static constexpr std::string_view kTag{"turboq/multicast"};
+    static constexpr std::string_view kTag = Options::tag;
 
     struct MemoryHeader {
         char tag[kTag.size()];
@@ -30,13 +35,19 @@ struct MulticastQueueDetail {
         std::size_t payloadOffset;
         std::size_t payloadSize;
     };
+
+    static_assert(std::atomic_ref<std::size_t>::is_always_lock_free);
+    static_assert(std::is_trivially_copyable_v<MemoryHeader>);
+    static_assert(std::is_trivially_copyable_v<MessageHeader>);
 };
 
-} // namespace detail
-
 /// Multicast queue producer
-class MulticastQueueProducer : detail::MulticastQueueDetail {
+template <typename Options>
+class MulticastQueueProducerImpl {
 private:
+    using MemoryHeader = typename MulticastQueueDetail<Options>::MemoryHeader;
+    using MessageHeader = typename MulticastQueueDetail<Options>::MessageHeader;
+
     MappedRegion storage_;
     std::span<std::byte> data_;
     MemoryHeader* header_{nullptr};
@@ -44,27 +55,33 @@ private:
     MessageHeader* lastMessageHeader_{nullptr};
 
 public:
-    MulticastQueueProducer() = default;
-    ~MulticastQueueProducer() = default;
+    MulticastQueueProducerImpl() = default;
+    ~MulticastQueueProducerImpl() = default;
 
-    MulticastQueueProducer(MulticastQueueProducer&& other) noexcept
+    MulticastQueueProducerImpl(MulticastQueueProducerImpl&& other) noexcept
         : storage_{std::move(other.storage_)}, data_{std::move(other.data_)},
           header_{std::exchange(other.header_, nullptr)}, producerPosCache_{std::exchange(other.producerPosCache_, 0)},
           lastMessageHeader_{std::exchange(other.lastMessageHeader_, nullptr)} {}
 
-    MulticastQueueProducer& operator=(MulticastQueueProducer&& other) noexcept {
+    MulticastQueueProducerImpl& operator=(MulticastQueueProducerImpl&& other) noexcept {
         if (this != &other) {
-            this->~MulticastQueueProducer();
-            new (this) MulticastQueueProducer{std::move(other)};
+            this->~MulticastQueueProducerImpl();
+            new (this) MulticastQueueProducerImpl{std::move(other)};
         }
         return *this;
     }
 
-    MulticastQueueProducer(MappedRegion&& storage) noexcept : storage_{std::move(storage)} {
+    MulticastQueueProducerImpl(MappedRegion&& storage) noexcept : storage_{std::move(storage)} {
+        assert(storage_);
+
         auto content = storage_.content();
         header_ = std::bit_cast<MemoryHeader*>(storage_.data());
         data_ = content.subspan(detail::align_up(sizeof(MemoryHeader), kCacheLineSize));
         producerPosCache_ = std::atomic_ref(header_->producerPos).load(std::memory_order_acquire);
+
+        if (auto const rc = storage_.advise(Advice::Sequential); !rc) {
+            std::fprintf(stderr, "WARNING: advise failed: %s\n", rc.error().message().c_str());
+        }
     }
 
     /// Return true on initialized
@@ -79,23 +96,23 @@ public:
 
     /// Reserve contiguous space for writing without making it visible to the consumers
     [[nodiscard]] TURBOQ_FORCE_INLINE auto prepare(std::size_t size) noexcept -> std::span<std::byte> {
-        constexpr auto headerAlignedSize = detail::align_up(sizeof(MessageHeader), kCacheLineSize);
-        auto const payloadAlignedSize = detail::align_up(size, kCacheLineSize);
-        auto const alignedSize = headerAlignedSize + payloadAlignedSize;
+        constexpr auto adjustedHeaderSize = detail::align_up(sizeof(MessageHeader), kCacheLineSize);
+        auto const adjustedPayloadSize = detail::align_up(size, kCacheLineSize);
+        auto const adjustedMessageSize = adjustedHeaderSize + adjustedPayloadSize;
 
         lastMessageHeader_ = std::bit_cast<MessageHeader*>(data_.data() + producerPosCache_);
-        lastMessageHeader_->size = payloadAlignedSize;
+        lastMessageHeader_->size = adjustedPayloadSize;
         lastMessageHeader_->payloadSize = size;
 
         // check enought space for current message + additional aligned header
-        if (producerPosCache_ + alignedSize + headerAlignedSize > data_.size()) [[unlikely]] {
+        if (producerPosCache_ + adjustedMessageSize + adjustedHeaderSize > data_.size()) [[unlikely]] {
             producerPosCache_ = 0;
         } else {
-            producerPosCache_ += headerAlignedSize;
+            producerPosCache_ += adjustedHeaderSize;
         }
 
         lastMessageHeader_->payloadOffset = producerPosCache_;
-        producerPosCache_ += payloadAlignedSize;
+        producerPosCache_ += adjustedPayloadSize;
 
         return data_.subspan(lastMessageHeader_->payloadOffset, lastMessageHeader_->payloadSize);
     }
@@ -120,8 +137,12 @@ public:
 };
 
 /// Multicast queue consumer
-class MulticastQueueConsumer : detail::MulticastQueueDetail {
+template <typename Options>
+class MulticastQueueConsumerImpl {
 private:
+    using MemoryHeader = typename MulticastQueueDetail<Options>::MemoryHeader;
+    using MessageHeader = typename MulticastQueueDetail<Options>::MessageHeader;
+
     MappedRegion storage_;
     std::span<std::byte> data_;
     MemoryHeader* header_{nullptr};
@@ -130,29 +151,37 @@ private:
     MessageHeader* lastMessageHeader_{nullptr};
 
 public:
-    MulticastQueueConsumer() = default;
-    ~MulticastQueueConsumer() = default;
+    MulticastQueueConsumerImpl() = default;
+    ~MulticastQueueConsumerImpl() = default;
 
-    MulticastQueueConsumer(MulticastQueueConsumer&& other) noexcept
+    MulticastQueueConsumerImpl(MulticastQueueConsumerImpl&& other) noexcept
         : storage_{std::move(other.storage_)}, data_{std::move(other.data_)},
           header_{std::exchange(other.header_, nullptr)}, consumerPosCache_{std::exchange(other.consumerPosCache_, 0)},
           producerPosCache_{std::exchange(other.producerPosCache_, 0)},
           lastMessageHeader_{std::exchange(other.lastMessageHeader_, nullptr)} {}
 
-    MulticastQueueConsumer& operator=(MulticastQueueConsumer&& other) noexcept {
+    MulticastQueueConsumerImpl& operator=(MulticastQueueConsumerImpl&& other) noexcept {
         if (this != &other) {
-            this->~MulticastQueueConsumer();
-            new (this) MulticastQueueConsumer(std::move(other));
+            this->~MulticastQueueConsumerImpl();
+            new (this) MulticastQueueConsumerImpl(std::move(other));
         }
         return *this;
     }
 
-    MulticastQueueConsumer(MappedRegion&& storage) noexcept : storage_{std::move(storage)} {
+    MulticastQueueConsumerImpl(MappedRegion&& storage) noexcept : storage_{std::move(storage)} {
+        assert(storage_);
+
         auto content = storage_.content();
         header_ = std::bit_cast<MemoryHeader*>(content.data());
         data_ = content.subspan(detail::align_up(sizeof(MemoryHeader), kCacheLineSize));
         consumerPosCache_ = std::atomic_ref(header_->producerPos).load(std::memory_order_relaxed);
         producerPosCache_ = consumerPosCache_;
+
+        assert((reinterpret_cast<uintptr_t>(data_.data()) & (kCacheLineSize - 1)) == 0);
+
+        if (auto const rc = storage_.advise(Advice::Sequential); !rc) {
+            std::fprintf(stderr, "WARNING: advise failed: %s\n", rc.error().message().c_str());
+        }
     }
 
     /// Return true on initialized
@@ -202,66 +231,146 @@ public:
 /// xxx - padding bytes
 /// uuu - unused bytes
 
-class MulticastQueue : detail::MulticastQueueDetail {
+template <typename Options>
+class MulticastQueueImpl {
 private:
+    using MemoryHeader = typename MulticastQueueDetail<Options>::MemoryHeader;
+    using MessageHeader = typename MulticastQueueDetail<Options>::MessageHeader;
+
     File file_;
 
-    MulticastQueue(File file) noexcept : file_{std::move(file)} {}
+    explicit MulticastQueueImpl(File file) noexcept : file_{std::move(file)} {}
 
 public:
-    using Producer = MulticastQueueProducer;
-    using Consumer = MulticastQueueConsumer;
+    using Producer = MulticastQueueProducerImpl<Options>;
+    using Consumer = MulticastQueueConsumerImpl<Options>;
 
     struct CreationOptions {
         std::size_t capacityHint;
     };
 
-    MulticastQueue(MulticastQueue const&) = delete;
-    MulticastQueue& operator=(MulticastQueue const&) = delete;
-    MulticastQueue() = default;
+    MulticastQueueImpl(MulticastQueueImpl const&) = delete;
+    MulticastQueueImpl& operator=(MulticastQueueImpl const&) = delete;
+    MulticastQueueImpl() = default;
 
-    MulticastQueue(MulticastQueue&& other) noexcept : file_{std::move(other.file_)} {}
+    MulticastQueueImpl(MulticastQueueImpl&& other) noexcept : file_{std::move(other.file_)} {}
 
-    MulticastQueue& operator=(MulticastQueue&& other) noexcept {
+    MulticastQueueImpl& operator=(MulticastQueueImpl&& other) noexcept {
         if (this != &other) {
-            this->~MulticastQueue();
-            new (this) MulticastQueue{std::move(other)};
+            this->~MulticastQueueImpl();
+            new (this) MulticastQueueImpl{std::move(other)};
         }
         return *this;
     }
 
     /// Construct multicast queue (open or create), throws std::runtime_error on error
-    MulticastQueue(std::string_view name, CreationOptions const& options,
-        MemorySource const& memorySource = DefaultMemorySource{});
+    MulticastQueueImpl(std::string_view name, CreationOptions const& options,
+        MemorySource const& memorySource = DefaultMemorySource{}) {
+        if (options.capacityHint == 0) {
+            throw std::system_error{makeErrorCode(Error::InvalidCreationOptions), "invalid capacity hint value"};
+        }
+
+        auto openMemorySourceResult = memorySource.open(name, MemorySource::OpenOrCreate);
+        if (!openMemorySourceResult) {
+            throw std::system_error{openMemorySourceResult.error(), "failed to open memory source"};
+        }
+
+        auto [file, pageSize] = std::move(openMemorySourceResult).value();
+
+        auto getFileSizeResult = file.tryGetFileSize();
+        if (!getFileSizeResult) {
+            throw std::system_error{getFileSizeResult.error(), "failed to get queue file size"};
+        }
+
+        auto const fileSize = getFileSizeResult.value();
+
+        // align up capacity hint to page size
+        auto const capacity = detail::align_up(options.capacityHint, pageSize);
+
+        if (fileSize == 0) {
+            // init queue on created
+            auto const truncateResult = file.tryTruncate(capacity);
+            if (!truncateResult) {
+                throw std::system_error{truncateResult.error(), "failed to truncate queue file"};
+            }
+        } else if (capacity != fileSize) {
+            // check file size on opened
+            throw std::system_error{makeErrorCode(Error::SizeMismatch), "queue unexpected capacity"};
+        }
+
+        auto mapFileResult = MappedRegion::makeMappedRegion(file, pageSize);
+        if (!mapFileResult) {
+            throw std::system_error{mapFileResult.error(), "failed to map queue file into memory"};
+        }
+
+        auto memory = std::move(mapFileResult).value();
+        auto buffer = memory.content();
+
+        if (fileSize == 0) {
+            // init queue internals
+            auto header = std::bit_cast<MemoryHeader*>(buffer.data());
+            std::atomic_ref(header->producerPos).store(0, std::memory_order_relaxed);
+            std::ranges::copy(MulticastQueueDetail<Options>::kTag, header->tag);
+        }
+
+        auto header = std::bit_cast<MemoryHeader const*>(buffer.data());
+        if (!std::ranges::equal(MulticastQueueDetail<Options>::kTag, header->tag)) {
+            throw std::system_error{makeErrorCode(Error::TagMismatch), "unexpected queue tag value"};
+        }
+
+        file_ = std::move(file);
+    }
 
     /// Construct multicast queue (open only), throws std::runtime_error on error
-    MulticastQueue(std::string_view name, MemorySource const& memorySource = DefaultMemorySource{});
+    MulticastQueueImpl(std::string_view name, MemorySource const& memorySource = DefaultMemorySource{}) {
+        auto openMemorySourceResult = memorySource.open(name, MemorySource::OpenOnly);
+        if (!openMemorySourceResult) {
+            throw std::system_error{openMemorySourceResult.error(), "failed to open memory source"};
+        }
+
+        auto [file, pageSize] = std::move(openMemorySourceResult).value();
+
+        auto mapFileResult = MappedRegion::makeMappedRegion(file, pageSize);
+        if (!mapFileResult) {
+            throw std::system_error{mapFileResult.error(), "failed to map queue file into memory"};
+        }
+
+        auto memory = std::move(mapFileResult).value();
+        auto buffer = memory.content();
+
+        auto header = std::bit_cast<MemoryHeader const*>(buffer.data());
+        if (!std::ranges::equal(MulticastQueueDetail<Options>::kTag, header->tag)) {
+            throw std::system_error{makeErrorCode(Error::TagMismatch), "unexpected queue tag value"};
+        }
+
+        file_ = std::move(file);
+    }
 
     template <typename... Args>
-    [[nodiscard]] static auto makeMulticastQueue(Args&&... args) noexcept
-        -> std::expected<MulticastQueue, std::error_code> {
+    [[nodiscard]] static auto makeMulticastQueue(
+        Args&&... args) noexcept -> std::expected<MulticastQueueImpl<Options>, std::error_code> {
         try {
-            return {MulticastQueue{std::forward<Args>(args)...}};
+            return {MulticastQueueImpl{std::forward<Args>(args)...}};
         } catch (std::system_error const& e) {
             return std::unexpected(e.code());
         }
     }
 
     template <typename... Args>
-    [[nodiscard]] static auto makeMulticastQueueProducer(Args&&... args) noexcept
-        -> std::expected<MulticastQueueProducer, std::error_code> {
+    [[nodiscard]] static auto makeMulticastQueueProducer(
+        Args&&... args) noexcept -> std::expected<Producer, std::error_code> {
         try {
-            return {MulticastQueue{std::forward<Args>(args)...}.createProducer()};
+            return {MulticastQueueImpl{std::forward<Args>(args)...}.createProducer()};
         } catch (std::system_error const& e) {
             return std::unexpected(e.code());
         }
     }
 
     template <typename... Args>
-    [[nodiscard]] static auto makeMulticastQueueConsumer(Args&&... args) noexcept
-        -> std::expected<MulticastQueueConsumer, std::error_code> {
+    [[nodiscard]] static auto makeMulticastQueueConsumer(
+        Args&&... args) noexcept -> std::expected<Consumer, std::error_code> {
         try {
-            return {MulticastQueue{std::forward<Args>(args)...}.createConsumer()};
+            return {MulticastQueueImpl{std::forward<Args>(args)...}.createConsumer()};
         } catch (std::system_error const& e) {
             return std::unexpected(e.code());
         }
@@ -273,10 +382,27 @@ public:
     }
 
     /// Create producer for the queue, throws std::system_error on error
-    [[nodiscard]] auto createProducer() -> Producer;
+    [[nodiscard]] TURBOQ_FORCE_INLINE auto createProducer() -> Producer {
+        assert(file_);
+        if (!file_.tryLock()) {
+            throw std::system_error{makeErrorCode(Error::ProducerAlreadyExists), "producer already exists"};
+        }
+        return Producer{MappedRegion{file_}};
+    }
 
     /// Create consumer for the queue, throws std::system_error on error
-    [[nodiscard]] auto createConsumer() -> Consumer;
+    [[nodiscard]] TURBOQ_FORCE_INLINE auto createConsumer() -> Consumer {
+        assert(file_);
+        return Consumer{MappedRegion{file_}};
+    }
 };
+
+} // namespace detail
+
+struct MulticastQueueOptionsDefault {
+    static constexpr std::string_view tag{"turboq/multicast"};
+};
+
+using MulticastQueue = detail::MulticastQueueImpl<MulticastQueueOptionsDefault>;
 
 } // namespace turboq

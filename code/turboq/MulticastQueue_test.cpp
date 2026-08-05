@@ -31,7 +31,7 @@ TEST_SUITE("MulticastQueue") {
         auto consumer = queue.createConsumer();
         REQUIRE(consumer);
 
-        REQUIRE(producer.capacity() == consumer.capacity());
+        REQUIRE_EQ(producer.capacity(), consumer.capacity());
 
         for (std::size_t i = 0; i < 500000; ++i) {
             for (std::uint64_t seq = 0; seq < 32; ++seq) {
@@ -45,7 +45,13 @@ TEST_SUITE("MulticastQueue") {
         }
 
         Message msg;
-        REQUIRE(!dequeue(consumer, msg));
+        REQUIRE_FALSE(dequeue(consumer, msg));
+    }
+
+    TEST_CASE("capacity 0") {
+        auto result = MulticastQueue::makeMulticastQueue(
+            "capacity", MulticastQueue::CreationOptions{.capacityHint = 0}, AnonymousMemorySource{});
+        REQUIRE_FALSE(result);
     }
 }
 

@@ -39,7 +39,9 @@ enum class Error {
     BufferTooSmall,
     SizeMismatch,
     TagMismatch,
+    InvalidCreationOptions,
     ProducerAlreadyExists,
+    ConsumerAlreadyExists,
 };
 
 struct ErrorCategory final : public std::error_category {
@@ -54,7 +56,9 @@ struct ErrorCategory final : public std::error_category {
         case Error::BufferTooSmall: return "buffer size is too small for queue";
         case Error::SizeMismatch: return "queue size mismatch previously created";
         case Error::TagMismatch: return "queue tag mismatch previously created";
+        case Error::InvalidCreationOptions: return "invalid creation options";
         case Error::ProducerAlreadyExists: return "queue producer already exists";
+        case Error::ConsumerAlreadyExists: return "queue consumer already exists";
         default: return "?";
         }
     }

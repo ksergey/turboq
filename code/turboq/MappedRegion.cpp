@@ -3,8 +3,7 @@
 
 #include "MappedRegion.h"
 
-#include <print>
-
+#include <cstdio>
 #include <sys/mman.h>
 
 #include "Error.h"
@@ -25,9 +24,35 @@ MappedRegion::MappedRegion(File const& file, std::size_t fileSize) {
 MappedRegion::~MappedRegion() noexcept {
     if (size_ > 0) {
         if (::munmap(data_, size_) != 0) {
-            std::print(stderr, "closing mapped region, it may be already unmapped\n");
+            std::fprintf(stderr, "closing mapped region, it may be already unmapped\n");
         }
     }
+}
+
+auto MappedRegion::advise(
+    std::size_t offset, std::size_t length, Advice advice) const noexcept -> std::expected<void, std::error_code> {
+    if (size_ == 0) {
+        return std::unexpected(makePosixErrorCode(EFAULT));
+    }
+
+    int value;
+    switch (advice) {
+    case Advice::Normal: {
+        value = MADV_NORMAL;
+    } break;
+    case Advice::Random: {
+        value = MADV_RANDOM;
+    } break;
+    case Advice::Sequential: {
+        value = MADV_SEQUENTIAL;
+    } break;
+    default: return std::unexpected(makePosixErrorCode(EINVAL));
+    }
+
+    if (auto const rc = ::madvise(data_ + offset, length, value); rc != 0) {
+        return std::unexpected(makePosixErrorCode(errno));
+    }
+    return {};
 }
 
 } // namespace turboq
