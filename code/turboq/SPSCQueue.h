@@ -119,6 +119,9 @@ public:
             producerPosCache_ += adjustedMessageSize;
             minFreeSpace_ -= adjustedMessageSize;
 
+            std::printf("prod1: producerPosCache_ = %llu, minFreeSpace_ = %llu\n",
+                static_cast<unsigned long long>(producerPosCache_), static_cast<unsigned long long>(minFreeSpace_));
+
             return data_.subspan(lastMessageHeader_->payloadOffset, lastMessageHeader_->payloadSize);
         }
 
@@ -136,6 +139,9 @@ public:
                 producerPosCache_ += adjustedMessageSize;
                 minFreeSpace_ -= adjustedMessageSize;
 
+                std::printf("prod2: producerPosCache_ = %llu, minFreeSpace_ = %llu\n",
+                    static_cast<unsigned long long>(producerPosCache_), static_cast<unsigned long long>(minFreeSpace_));
+
                 return data_.subspan(lastMessageHeader_->payloadOffset, lastMessageHeader_->payloadSize);
             }
         } else {
@@ -151,6 +157,9 @@ public:
                 producerPosCache_ += adjustedMessageSize;
                 minFreeSpace_ -= adjustedMessageSize;
 
+                std::printf("prod3: producerPosCache_ = %llu, minFreeSpace_ = %llu\n",
+                    static_cast<unsigned long long>(producerPosCache_), static_cast<unsigned long long>(minFreeSpace_));
+
                 return data_.subspan(lastMessageHeader_->payloadOffset, lastMessageHeader_->payloadSize);
             }
 
@@ -163,9 +172,15 @@ public:
                 producerPosCache_ = lastMessageHeader_->size;
                 minFreeSpace_ = consumerPosCache - producerPosCache_ - 1;
 
+                std::printf("prod4: producerPosCache_ = %llu, minFreeSpace_ = %llu\n",
+                    static_cast<unsigned long long>(producerPosCache_), static_cast<unsigned long long>(minFreeSpace_));
+
                 return data_.subspan(lastMessageHeader_->payloadOffset, lastMessageHeader_->payloadSize);
             }
         }
+
+        std::printf("prod5: producerPosCache_ = %llu, minFreeSpace_ = %llu\n",
+            static_cast<unsigned long long>(producerPosCache_), static_cast<unsigned long long>(minFreeSpace_));
 
         return {};
     }
