@@ -13,7 +13,7 @@ namespace turboq::testing {
 
 TEST_SUITE("MulticastQueue") {
 
-    struct Message {
+    struct alignas(64) Message {
         std::uint64_t seq;
     };
 

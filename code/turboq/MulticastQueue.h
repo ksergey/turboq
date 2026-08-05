@@ -74,14 +74,14 @@ public:
     MulticastQueueProducerImpl(MappedRegion&& storage) noexcept : storage_{std::move(storage)} {
         assert(storage_);
 
+        if (auto const rc = storage_.advise(Advice::Sequential); !rc) {
+            std::fprintf(stderr, "WARNING: advise failed: %s\n", rc.error().message().c_str());
+        }
+
         auto content = storage_.content();
         header_ = std::bit_cast<MemoryHeader*>(storage_.data());
         data_ = content.subspan(detail::align_up(sizeof(MemoryHeader), kCacheLineSize));
         producerPosCache_ = std::atomic_ref(header_->producerPos).load(std::memory_order_acquire);
-
-        if (auto const rc = storage_.advise(Advice::Sequential); !rc) {
-            std::fprintf(stderr, "WARNING: advise failed: %s\n", rc.error().message().c_str());
-        }
     }
 
     /// Return true on initialized
@@ -171,6 +171,10 @@ public:
     MulticastQueueConsumerImpl(MappedRegion&& storage) noexcept : storage_{std::move(storage)} {
         assert(storage_);
 
+        if (auto const rc = storage_.advise(Advice::Sequential); !rc) {
+            std::fprintf(stderr, "WARNING: advise failed: %s\n", rc.error().message().c_str());
+        }
+
         auto content = storage_.content();
         header_ = std::bit_cast<MemoryHeader*>(content.data());
         data_ = content.subspan(detail::align_up(sizeof(MemoryHeader), kCacheLineSize));
@@ -178,10 +182,6 @@ public:
         producerPosCache_ = consumerPosCache_;
 
         assert((reinterpret_cast<uintptr_t>(data_.data()) & (kCacheLineSize - 1)) == 0);
-
-        if (auto const rc = storage_.advise(Advice::Sequential); !rc) {
-            std::fprintf(stderr, "WARNING: advise failed: %s\n", rc.error().message().c_str());
-        }
     }
 
     /// Return true on initialized
@@ -309,8 +309,8 @@ public:
         if (fileSize == 0) {
             // init queue internals
             auto header = std::bit_cast<MemoryHeader*>(buffer.data());
-            std::atomic_ref(header->producerPos).store(0, std::memory_order_relaxed);
             std::ranges::copy(MulticastQueueDetail<Options>::kTag, header->tag);
+            std::atomic_ref(header->producerPos).store(0, std::memory_order_relaxed);
         }
 
         auto header = std::bit_cast<MemoryHeader const*>(buffer.data());
@@ -347,8 +347,8 @@ public:
     }
 
     template <typename... Args>
-    [[nodiscard]] static auto makeMulticastQueue(
-        Args&&... args) noexcept -> std::expected<MulticastQueueImpl<Options>, std::error_code> {
+    [[nodiscard]] static auto makeMulticastQueue(Args&&... args) noexcept
+        -> std::expected<MulticastQueueImpl<Options>, std::error_code> {
         try {
             return {MulticastQueueImpl{std::forward<Args>(args)...}};
         } catch (std::system_error const& e) {
@@ -357,8 +357,8 @@ public:
     }
 
     template <typename... Args>
-    [[nodiscard]] static auto makeMulticastQueueProducer(
-        Args&&... args) noexcept -> std::expected<Producer, std::error_code> {
+    [[nodiscard]] static auto makeMulticastQueueProducer(Args&&... args) noexcept
+        -> std::expected<Producer, std::error_code> {
         try {
             return {MulticastQueueImpl{std::forward<Args>(args)...}.createProducer()};
         } catch (std::system_error const& e) {
@@ -367,8 +367,8 @@ public:
     }
 
     template <typename... Args>
-    [[nodiscard]] static auto makeMulticastQueueConsumer(
-        Args&&... args) noexcept -> std::expected<Consumer, std::error_code> {
+    [[nodiscard]] static auto makeMulticastQueueConsumer(Args&&... args) noexcept
+        -> std::expected<Consumer, std::error_code> {
         try {
             return {MulticastQueueImpl{std::forward<Args>(args)...}.createConsumer()};
         } catch (std::system_error const& e) {
