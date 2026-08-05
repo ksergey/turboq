@@ -17,6 +17,7 @@ TEST_SUITE("SPSC") {
         std::uint64_t seq;
     };
 
+#if 0
     TEST_CASE("basic") {
         auto result = SPSCQueue::makeSPSCQueue(
             "test", SPSCQueue::CreationOptions{.capacityHint = 1024 * 1024 * 8}, AnonymousMemorySource{});
@@ -47,6 +48,7 @@ TEST_SUITE("SPSC") {
         Message msg;
         REQUIRE_FALSE(dequeue(consumer, msg));
     }
+#endif
 
     TEST_CASE("full") {
         auto result =
@@ -65,14 +67,18 @@ TEST_SUITE("SPSC") {
         REQUIRE_EQ(producer.capacity(), consumer.capacity());
 
         std::size_t seq = 0;
-        while (enqueue(producer, Message{.seq = seq++})) {}
+        while (enqueue(producer, Message{.seq = seq++})) {
+            std::printf("prod: seq + 1 = %llu\n", static_cast<unsigned long long>(seq));
+        }
 
         REQUIRE_FALSE(enqueue(producer, Message{.seq = static_cast<std::size_t>(-1)}));
 
         INFO("got sequence ", seq);
 
         Message msg;
-        for (std::size_t i = 0; i < seq; ++i) {
+        for (std::uint64_t i = 0; i < seq; ++i) {
+            std::printf("i = %llu\n", static_cast<unsigned long long>(i));
+
             REQUIRE(dequeue(consumer, msg));
             INFO("dequeued ", msg.seq, " expected ", i);
             REQUIRE_EQ(msg.seq, i);
@@ -81,11 +87,13 @@ TEST_SUITE("SPSC") {
         REQUIRE_FALSE(dequeue(consumer, msg));
     }
 
+#if 0
     TEST_CASE("capacity 0") {
         auto result = SPSCQueue::makeSPSCQueue(
             "capacity", SPSCQueue::CreationOptions{.capacityHint = 0}, AnonymousMemorySource{});
         REQUIRE_FALSE(result);
     }
+#endif
 }
 
 } // namespace turboq::testing

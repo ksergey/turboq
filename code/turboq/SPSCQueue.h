@@ -247,9 +247,12 @@ public:
 
     /// Get next buffer for reading. Return empty buffer in case of no data.
     [[nodiscard]] TURBOQ_FORCE_INLINE auto fetch() noexcept -> std::span<std::byte const> {
-        if (producerPosCache_ == consumerPosCache_ &&
+        std::printf("consumerPosCache_ = %llu, producerPosCache_ = %llu\n",
+            static_cast<unsigned long long>(consumerPosCache_), static_cast<unsigned long long>(producerPosCache_));
+
+        if (consumerPosCache_ == producerPosCache_ &&
             (producerPosCache_ = std::atomic_ref(header_->producerPos).load(std::memory_order_acquire)) ==
-                consumerPosCache_) {
+                consumerPosCache_) [[unlikely]] {
             return {};
         }
 
