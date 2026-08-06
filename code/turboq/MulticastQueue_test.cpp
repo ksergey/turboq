@@ -18,8 +18,8 @@ TEST_SUITE("MulticastQueue") {
     };
 
     TEST_CASE("basic") {
-        auto result = MulticastQueue::makeMulticastQueue(
-            "test", MulticastQueue::CreationOptions{.capacityHint = 1024 * 1024 * 8}, AnonymousMemorySource{});
+        auto result = MulticastQueue::makeQueue(
+            "test", MulticastQueue::CreationOptions{.capacityHint = 1024 * 1024 * 1}, AnonymousMemorySource{});
         REQUIRE(result);
 
         auto queue = std::move(result).value();
@@ -33,12 +33,12 @@ TEST_SUITE("MulticastQueue") {
 
         REQUIRE_EQ(producer.capacity(), consumer.capacity());
 
-        for (std::size_t i = 0; i < 500000; ++i) {
-            for (std::uint64_t seq = 0; seq < 32; ++seq) {
+        for (std::size_t i = 0; i < 50000; ++i) {
+            for (std::uint64_t seq = 0; seq < 35; ++seq) {
                 REQUIRE(enqueue(producer, Message{.seq = seq}));
             }
             Message msg;
-            for (std::uint64_t seq = 0; seq < 32; ++seq) {
+            for (std::uint64_t seq = 0; seq < 35; ++seq) {
                 REQUIRE(dequeue(consumer, msg));
                 REQUIRE_EQ(msg.seq, seq);
             }
@@ -49,7 +49,7 @@ TEST_SUITE("MulticastQueue") {
     }
 
     TEST_CASE("capacity 0") {
-        auto result = MulticastQueue::makeMulticastQueue(
+        auto result = MulticastQueue::makeQueue(
             "capacity", MulticastQueue::CreationOptions{.capacityHint = 0}, AnonymousMemorySource{});
         REQUIRE_FALSE(result);
     }

@@ -40,6 +40,7 @@ enum class Error {
     SizeMismatch,
     TagMismatch,
     InvalidCreationOptions,
+    MessageSizeExceedSlotSize,
     ProducerAlreadyExists,
     ConsumerAlreadyExists,
 };
@@ -57,6 +58,7 @@ struct ErrorCategory final : public std::error_category {
         case Error::SizeMismatch: return "queue size mismatch previously created";
         case Error::TagMismatch: return "queue tag mismatch previously created";
         case Error::InvalidCreationOptions: return "invalid creation options";
+        case Error::MessageSizeExceedSlotSize: return "message size exceed slot size";
         case Error::ProducerAlreadyExists: return "queue producer already exists";
         case Error::ConsumerAlreadyExists: return "queue consumer already exists";
         default: return "?";

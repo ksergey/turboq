@@ -40,14 +40,31 @@ struct SPSCQueueDetail {
     static_assert(std::atomic_ref<std::size_t>::is_always_lock_free);
     static_assert(std::is_trivially_copyable_v<MemoryHeader>);
     static_assert(std::is_trivially_copyable_v<MessageHeader>);
+
+    static constexpr auto getMemoryHeaderBufferSize() noexcept -> std::size_t {
+        return detail::align_up(sizeof(MemoryHeader), kCacheLineSize);
+    }
+
+    static constexpr auto getMessageHeaderBufferSize() noexcept -> std::size_t {
+        return detail::align_up(sizeof(MessageHeader), kCacheLineSize);
+    }
+
+    static constexpr auto adjustMessagePayloadBufferSize(std::size_t payloadSize) noexcept -> std::size_t {
+        return detail::align_up(payloadSize, kCacheLineSize);
+    }
+
+    static constexpr auto adjustMessageBufferSize(std::size_t payloadSize) noexcept -> std::size_t {
+        return getMessageHeaderBufferSize() + adjustMessagePayloadBufferSize(payloadSize);
+    }
 };
 
 /// SPSC queue producer
 template <typename Options>
 class SPSCQueueProducerImpl {
 private:
-    using MemoryHeader = typename SPSCQueueDetail<Options>::MemoryHeader;
-    using MessageHeader = typename SPSCQueueDetail<Options>::MessageHeader;
+    using Details = SPSCQueueDetail<Options>;
+    using MemoryHeader = typename Details::MemoryHeader;
+    using MessageHeader = typename Details::MessageHeader;
 
     MappedRegion storage_;
     std::span<std::byte> data_;
@@ -83,15 +100,16 @@ public:
 
         auto content = storage_.content();
         header_ = std::bit_cast<MemoryHeader*>(storage_.data());
-        data_ = content.subspan(detail::align_up(sizeof(MemoryHeader), kCacheLineSize));
+        data_ = content.subspan(Details::getMemoryHeaderBufferSize());
         producerPosCache_ = std::atomic_ref(header_->producerPos).load(std::memory_order_acquire);
+
         auto const consumerPos = std::atomic_ref(header_->consumerPos).load(std::memory_order_acquire);
         if (consumerPos > producerPosCache_) {
             // queue is empty in case of consumerPos == producerPos
             minFreeSpace_ = consumerPos - producerPosCache_ - 1;
         } else {
             // Reserve space at end for last MessageHeader
-            minFreeSpace_ = data_.size() - producerPosCache_ - sizeof(MessageHeader);
+            minFreeSpace_ = data_.size() - producerPosCache_ - Details::getMessageHeaderBufferSize();
         }
     }
 
@@ -107,80 +125,69 @@ public:
 
     /// Reserve contiguous space for writing without making it visible to the consumers
     [[nodiscard]] TURBOQ_FORCE_INLINE auto prepare(std::size_t size) noexcept -> std::span<std::byte> {
-        constexpr auto adjustedHeaderSize = detail::align_up(sizeof(MessageHeader), kCacheLineSize);
-        auto const adjustedPayloadSize = detail::align_up(size, kCacheLineSize);
-        auto const adjustedMessageSize = adjustedHeaderSize + adjustedPayloadSize;
+        // Aligned buffer size for encoding MessageHeader
+        constexpr auto headerBufferSize = Details::getMessageHeaderBufferSize();
+        // Aligned buffer size for encoding payload (size)
+        auto const payloadBufferSize = Details::adjustMessagePayloadBufferSize(size);
+        // Aligned buffer size for encoding whole message
+        auto const messageBufferSize = Details::adjustMessageBufferSize(size);
 
-        if (adjustedMessageSize <= minFreeSpace_) [[likely]] {
+        assert(messageBufferSize >= headerBufferSize + payloadBufferSize);
+
+        if (messageBufferSize <= minFreeSpace_) [[likely]] {
             lastMessageHeader_ = std::bit_cast<MessageHeader*>(data_.data() + producerPosCache_);
-            lastMessageHeader_->size = adjustedPayloadSize;
+            lastMessageHeader_->size = payloadBufferSize;
             lastMessageHeader_->payloadSize = size;
-            lastMessageHeader_->payloadOffset = producerPosCache_ + adjustedHeaderSize;
-            producerPosCache_ += adjustedMessageSize;
-            minFreeSpace_ -= adjustedMessageSize;
-
-            std::printf("prod1: producerPosCache_ = %llu, minFreeSpace_ = %llu\n",
-                static_cast<unsigned long long>(producerPosCache_), static_cast<unsigned long long>(minFreeSpace_));
+            lastMessageHeader_->payloadOffset = producerPosCache_ + headerBufferSize;
+            producerPosCache_ += messageBufferSize;
+            minFreeSpace_ -= messageBufferSize;
 
             return data_.subspan(lastMessageHeader_->payloadOffset, lastMessageHeader_->payloadSize);
         }
 
         auto const consumerPosCache = std::atomic_ref(header_->consumerPos).load(std::memory_order_acquire);
-
         if (consumerPosCache > producerPosCache_) {
             // queue is empty in case of consumerPos == producerPos
             minFreeSpace_ = consumerPosCache - producerPosCache_ - 1;
 
-            if (adjustedMessageSize <= minFreeSpace_) [[likely]] {
+            if (messageBufferSize <= minFreeSpace_) [[likely]] {
                 lastMessageHeader_ = std::bit_cast<MessageHeader*>(data_.data() + producerPosCache_);
-                lastMessageHeader_->size = adjustedPayloadSize;
+                lastMessageHeader_->size = payloadBufferSize;
                 lastMessageHeader_->payloadSize = size;
-                lastMessageHeader_->payloadOffset = producerPosCache_ + adjustedHeaderSize;
-                producerPosCache_ += adjustedMessageSize;
-                minFreeSpace_ -= adjustedMessageSize;
-
-                std::printf("prod2: producerPosCache_ = %llu, minFreeSpace_ = %llu\n",
-                    static_cast<unsigned long long>(producerPosCache_), static_cast<unsigned long long>(minFreeSpace_));
+                lastMessageHeader_->payloadOffset = producerPosCache_ + headerBufferSize;
+                producerPosCache_ += messageBufferSize;
+                minFreeSpace_ -= messageBufferSize;
 
                 return data_.subspan(lastMessageHeader_->payloadOffset, lastMessageHeader_->payloadSize);
             }
         } else {
-            assert(adjustedHeaderSize <= (data_.size() - producerPosCache_));
+            assert(headerBufferSize <= (data_.size() - producerPosCache_));
 
-            minFreeSpace_ = data_.size() - producerPosCache_ - adjustedHeaderSize;
+            minFreeSpace_ = data_.size() - producerPosCache_ - headerBufferSize;
 
-            if (adjustedMessageSize <= minFreeSpace_) [[likely]] {
+            if (messageBufferSize <= minFreeSpace_) [[likely]] {
                 lastMessageHeader_ = std::bit_cast<MessageHeader*>(data_.data() + producerPosCache_);
-                lastMessageHeader_->size = adjustedPayloadSize;
+                lastMessageHeader_->size = payloadBufferSize;
                 lastMessageHeader_->payloadSize = size;
-                lastMessageHeader_->payloadOffset = producerPosCache_ + adjustedHeaderSize;
-                producerPosCache_ += adjustedMessageSize;
-                minFreeSpace_ -= adjustedMessageSize;
-
-                std::printf("prod3: producerPosCache_ = %llu, minFreeSpace_ = %llu\n",
-                    static_cast<unsigned long long>(producerPosCache_), static_cast<unsigned long long>(minFreeSpace_));
+                lastMessageHeader_->payloadOffset = producerPosCache_ + headerBufferSize;
+                producerPosCache_ += messageBufferSize;
+                minFreeSpace_ -= messageBufferSize;
 
                 return data_.subspan(lastMessageHeader_->payloadOffset, lastMessageHeader_->payloadSize);
             }
 
             // align payload to cache-line size when payload starts from begining
-            if (adjustedPayloadSize < consumerPosCache) {
+            if (payloadBufferSize < consumerPosCache) {
                 lastMessageHeader_ = std::bit_cast<MessageHeader*>(data_.data() + producerPosCache_);
-                lastMessageHeader_->size = adjustedPayloadSize;
+                lastMessageHeader_->size = payloadBufferSize;
                 lastMessageHeader_->payloadSize = size;
                 lastMessageHeader_->payloadOffset = 0;
                 producerPosCache_ = lastMessageHeader_->size;
                 minFreeSpace_ = consumerPosCache - producerPosCache_ - 1;
 
-                std::printf("prod4: producerPosCache_ = %llu, minFreeSpace_ = %llu\n",
-                    static_cast<unsigned long long>(producerPosCache_), static_cast<unsigned long long>(minFreeSpace_));
-
                 return data_.subspan(lastMessageHeader_->payloadOffset, lastMessageHeader_->payloadSize);
             }
         }
-
-        std::printf("prod5: producerPosCache_ = %llu, minFreeSpace_ = %llu\n",
-            static_cast<unsigned long long>(producerPosCache_), static_cast<unsigned long long>(minFreeSpace_));
 
         return {};
     }
@@ -206,8 +213,9 @@ public:
 template <typename Options>
 class SPSCQueueConsumerImpl {
 private:
-    using MemoryHeader = typename SPSCQueueDetail<Options>::MemoryHeader;
-    using MessageHeader = typename SPSCQueueDetail<Options>::MessageHeader;
+    using Details = SPSCQueueDetail<Options>;
+    using MemoryHeader = typename Details::MemoryHeader;
+    using MessageHeader = typename Details::MessageHeader;
 
     MappedRegion storage_;
     std::span<std::byte> data_;
@@ -243,7 +251,7 @@ public:
 
         auto content = storage_.content();
         header_ = std::bit_cast<MemoryHeader*>(content.data());
-        data_ = content.subspan(detail::align_up(sizeof(MemoryHeader), kCacheLineSize));
+        data_ = content.subspan(Details::getMemoryHeaderBufferSize());
         consumerPosCache_ = std::atomic_ref(header_->consumerPos).load(std::memory_order_relaxed);
         producerPosCache_ = std::atomic_ref(header_->producerPos).load(std::memory_order_acquire);
 
@@ -262,15 +270,11 @@ public:
 
     /// Get next buffer for reading. Return empty buffer in case of no data.
     [[nodiscard]] TURBOQ_FORCE_INLINE auto fetch() noexcept -> std::span<std::byte const> {
-        std::printf("consumerPosCache_ = %llu, producerPosCache_ = %llu\n",
-            static_cast<unsigned long long>(consumerPosCache_), static_cast<unsigned long long>(producerPosCache_));
-
         if (consumerPosCache_ == producerPosCache_ &&
             (producerPosCache_ = std::atomic_ref(header_->producerPos).load(std::memory_order_acquire)) ==
                 consumerPosCache_) [[unlikely]] {
             return {};
         }
-
         lastMessageHeader_ = std::bit_cast<MessageHeader*>(data_.data() + consumerPosCache_);
         return data_.subspan(lastMessageHeader_->payloadOffset, lastMessageHeader_->payloadSize);
     }
@@ -278,8 +282,10 @@ public:
     /// Consume buffer and make buffer space available for producer
     /// pre: fetch() -> non empty buffer
     TURBOQ_FORCE_INLINE void consume() noexcept {
+        assert((reinterpret_cast<std::uintptr_t>(lastMessageHeader_) & (kCacheLineSize - 1)) == 0);
         assert((lastMessageHeader_->payloadOffset & (kCacheLineSize - 1)) == 0);
         assert((lastMessageHeader_->size & (kCacheLineSize - 1)) == 0);
+
         consumerPosCache_ = lastMessageHeader_->payloadOffset + lastMessageHeader_->size;
         std::atomic_ref(header_->consumerPos).store(consumerPosCache_, std::memory_order_release);
     }
@@ -305,8 +311,9 @@ public:
 template <typename Options>
 class SPSCQueueImpl {
 private:
-    using MemoryHeader = typename SPSCQueueDetail<Options>::MemoryHeader;
-    using MessageHeader = typename SPSCQueueDetail<Options>::MessageHeader;
+    using Details = SPSCQueueDetail<Options>;
+    using MemoryHeader = typename Details::MemoryHeader;
+    using MessageHeader = typename Details::MessageHeader;
 
     File file_;
 
@@ -334,7 +341,7 @@ public:
         return *this;
     }
 
-    /// Construct multicast queue (open or create), throws std::runtime_error on error
+    /// Construct spsc queue (open or create), throws std::runtime_error on error
     SPSCQueueImpl(std::string_view name, CreationOptions const& options,
         MemorySource const& memorySource = DefaultMemorySource{}) {
         if (options.capacityHint == 0) {
@@ -347,6 +354,7 @@ public:
         }
 
         auto [file, pageSize] = std::move(openMemorySourceResult).value();
+        assert(pageSize > 0 && ((pageSize & (kCacheLineSize - 1)) == 0));
 
         auto getFileSizeResult = file.tryGetFileSize();
         if (!getFileSizeResult) {
@@ -393,7 +401,7 @@ public:
         file_ = std::move(file);
     }
 
-    /// Construct multicast queue (open only), throws std::runtime_error on error
+    /// Construct spsc queue (open only), throws std::runtime_error on error
     SPSCQueueImpl(std::string_view name, MemorySource const& memorySource = DefaultMemorySource{}) {
         auto openMemorySourceResult = memorySource.open(name, MemorySource::OpenOnly);
         if (!openMemorySourceResult) {
@@ -419,8 +427,8 @@ public:
     }
 
     template <typename... Args>
-    [[nodiscard]] static auto makeSPSCQueue(Args&&... args) noexcept
-        -> std::expected<SPSCQueueImpl<Options>, std::error_code> {
+    [[nodiscard]] static auto makeQueue(
+        Args&&... args) noexcept -> std::expected<SPSCQueueImpl<Options>, std::error_code> {
         try {
             return {SPSCQueueImpl{std::forward<Args>(args)...}};
         } catch (std::system_error const& e) {
@@ -429,8 +437,7 @@ public:
     }
 
     template <typename... Args>
-    [[nodiscard]] static auto makeSPSCQueueProducer(Args&&... args) noexcept
-        -> std::expected<Producer, std::error_code> {
+    [[nodiscard]] static auto makeProducer(Args&&... args) noexcept -> std::expected<Producer, std::error_code> {
         try {
             return {SPSCQueueImpl{std::forward<Args>(args)...}.createProducer()};
         } catch (std::system_error const& e) {
@@ -439,8 +446,7 @@ public:
     }
 
     template <typename... Args>
-    [[nodiscard]] static auto makeSPSCQueueConsumer(Args&&... args) noexcept
-        -> std::expected<Consumer, std::error_code> {
+    [[nodiscard]] static auto makeConsumer(Args&&... args) noexcept -> std::expected<Consumer, std::error_code> {
         try {
             return {SPSCQueueImpl{std::forward<Args>(args)...}.createConsumer()};
         } catch (std::system_error const& e) {
@@ -456,9 +462,6 @@ public:
     /// Create producer for the queue, throws std::system_error on error
     [[nodiscard]] TURBOQ_FORCE_INLINE auto createProducer() -> Producer {
         assert(file_);
-        if (!file_.tryLock()) {
-            throw std::system_error{makeErrorCode(Error::ProducerAlreadyExists), "producer already exists"};
-        }
         return Producer{MappedRegion{file_}};
     }
 

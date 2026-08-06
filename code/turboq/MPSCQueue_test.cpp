@@ -6,20 +6,21 @@
 
 #include <doctest/doctest.h>
 
-#include "SPSCQueue.h"
+#include "MPSCQueue.h"
 #include "TestUtils.h"
 
 namespace turboq::testing {
 
-TEST_SUITE("SPSC") {
+TEST_SUITE("MPSC") {
 
     struct alignas(64) Message {
         std::uint64_t seq;
     };
 
     TEST_CASE("basic") {
-        auto result = SPSCQueue::makeQueue(
-            "test", SPSCQueue::CreationOptions{.capacityHint = 1024 * 1024 * 1}, AnonymousMemorySource{});
+        auto result = MPSCQueue::makeQueue("test",
+            MPSCQueue::CreationOptions{.slotSizeHint = 2 * sizeof(Message), .lengthHint = 100},
+            AnonymousMemorySource{});
         REQUIRE(result);
 
         auto queue = std::move(result).value();
@@ -31,7 +32,8 @@ TEST_SUITE("SPSC") {
         auto consumer = queue.createConsumer();
         REQUIRE(consumer);
 
-        REQUIRE_EQ(producer.capacity(), consumer.capacity());
+        REQUIRE_EQ(producer.slotSize(), consumer.slotSize());
+        REQUIRE_EQ(producer.length(), consumer.length());
 
         for (std::size_t i = 0; i < 50000; ++i) {
             for (std::uint64_t seq = 0; seq < 35; ++seq) {
@@ -49,8 +51,8 @@ TEST_SUITE("SPSC") {
     }
 
     TEST_CASE("full") {
-        auto result =
-            SPSCQueue::makeQueue("test", SPSCQueue::CreationOptions{.capacityHint = 2048}, AnonymousMemorySource{});
+        auto result = MPSCQueue::makeQueue("test",
+            MPSCQueue::CreationOptions{.slotSizeHint = sizeof(Message), .lengthHint = 32}, AnonymousMemorySource{});
         REQUIRE(result);
 
         auto queue = std::move(result).value();
@@ -62,7 +64,8 @@ TEST_SUITE("SPSC") {
         auto consumer = queue.createConsumer();
         REQUIRE(consumer);
 
-        REQUIRE_EQ(producer.capacity(), consumer.capacity());
+        REQUIRE_EQ(producer.slotSize(), consumer.slotSize());
+        REQUIRE_EQ(producer.length(), consumer.length());
 
         std::size_t seq = 0;
         while (enqueue(producer, Message{.seq = seq})) {
@@ -78,12 +81,6 @@ TEST_SUITE("SPSC") {
         }
 
         REQUIRE_FALSE(dequeue(consumer, msg));
-    }
-
-    TEST_CASE("capacity 0") {
-        auto result =
-            SPSCQueue::makeQueue("capacity", SPSCQueue::CreationOptions{.capacityHint = 0}, AnonymousMemorySource{});
-        REQUIRE_FALSE(result);
     }
 }
 

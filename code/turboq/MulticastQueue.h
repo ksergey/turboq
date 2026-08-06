@@ -39,14 +39,31 @@ struct MulticastQueueDetail {
     static_assert(std::atomic_ref<std::size_t>::is_always_lock_free);
     static_assert(std::is_trivially_copyable_v<MemoryHeader>);
     static_assert(std::is_trivially_copyable_v<MessageHeader>);
+
+    static constexpr auto getMemoryHeaderBufferSize() noexcept -> std::size_t {
+        return detail::align_up(sizeof(MemoryHeader), kCacheLineSize);
+    }
+
+    static constexpr auto getMessageHeaderBufferSize() noexcept -> std::size_t {
+        return detail::align_up(sizeof(MessageHeader), kCacheLineSize);
+    }
+
+    static constexpr auto adjustMessagePayloadBufferSize(std::size_t payloadSize) noexcept -> std::size_t {
+        return detail::align_up(payloadSize, kCacheLineSize);
+    }
+
+    static constexpr auto adjustMessageBufferSize(std::size_t payloadSize) noexcept -> std::size_t {
+        return getMessageHeaderBufferSize() + adjustMessagePayloadBufferSize(payloadSize);
+    }
 };
 
 /// Multicast queue producer
 template <typename Options>
 class MulticastQueueProducerImpl {
 private:
-    using MemoryHeader = typename MulticastQueueDetail<Options>::MemoryHeader;
-    using MessageHeader = typename MulticastQueueDetail<Options>::MessageHeader;
+    using Details = MulticastQueueDetail<Options>;
+    using MemoryHeader = typename Details::MemoryHeader;
+    using MessageHeader = typename Details::MessageHeader;
 
     MappedRegion storage_;
     std::span<std::byte> data_;
@@ -80,7 +97,7 @@ public:
 
         auto content = storage_.content();
         header_ = std::bit_cast<MemoryHeader*>(storage_.data());
-        data_ = content.subspan(detail::align_up(sizeof(MemoryHeader), kCacheLineSize));
+        data_ = content.subspan(Details::getMemoryHeaderBufferSize());
         producerPosCache_ = std::atomic_ref(header_->producerPos).load(std::memory_order_acquire);
     }
 
@@ -96,23 +113,26 @@ public:
 
     /// Reserve contiguous space for writing without making it visible to the consumers
     [[nodiscard]] TURBOQ_FORCE_INLINE auto prepare(std::size_t size) noexcept -> std::span<std::byte> {
-        constexpr auto adjustedHeaderSize = detail::align_up(sizeof(MessageHeader), kCacheLineSize);
-        auto const adjustedPayloadSize = detail::align_up(size, kCacheLineSize);
-        auto const adjustedMessageSize = adjustedHeaderSize + adjustedPayloadSize;
+        // Aligned buffer size for encoding MessageHeader
+        constexpr auto headerBufferSize = Details::getMessageHeaderBufferSize();
+        // Aligned buffer size for encoding payload (size)
+        auto const payloadBufferSize = Details::adjustMessagePayloadBufferSize(size);
+        // Aligned buffer size for encoding whole message
+        auto const messageBufferSize = Details::adjustMessageBufferSize(size);
 
         lastMessageHeader_ = std::bit_cast<MessageHeader*>(data_.data() + producerPosCache_);
-        lastMessageHeader_->size = adjustedPayloadSize;
+        lastMessageHeader_->size = payloadBufferSize;
         lastMessageHeader_->payloadSize = size;
 
         // check enought space for current message + additional aligned header
-        if (producerPosCache_ + adjustedMessageSize + adjustedHeaderSize > data_.size()) [[unlikely]] {
+        if (producerPosCache_ + messageBufferSize + headerBufferSize > data_.size()) [[unlikely]] {
             producerPosCache_ = 0;
         } else {
-            producerPosCache_ += adjustedHeaderSize;
+            producerPosCache_ += headerBufferSize;
         }
 
         lastMessageHeader_->payloadOffset = producerPosCache_;
-        producerPosCache_ += adjustedPayloadSize;
+        producerPosCache_ += payloadBufferSize;
 
         return data_.subspan(lastMessageHeader_->payloadOffset, lastMessageHeader_->payloadSize);
     }
@@ -127,8 +147,6 @@ public:
         // Update payload size
         if (size <= lastMessageHeader_->payloadSize) [[likely]] {
             lastMessageHeader_->payloadSize = size;
-            // This is not necessory change
-            lastMessageHeader_->size = detail::align_up(size, kCacheLineSize);
         } else {
             assert(false);
         }
@@ -140,8 +158,9 @@ public:
 template <typename Options>
 class MulticastQueueConsumerImpl {
 private:
-    using MemoryHeader = typename MulticastQueueDetail<Options>::MemoryHeader;
-    using MessageHeader = typename MulticastQueueDetail<Options>::MessageHeader;
+    using Details = MulticastQueueDetail<Options>;
+    using MemoryHeader = typename Details::MemoryHeader;
+    using MessageHeader = typename Details::MessageHeader;
 
     MappedRegion storage_;
     std::span<std::byte> data_;
@@ -177,7 +196,7 @@ public:
 
         auto content = storage_.content();
         header_ = std::bit_cast<MemoryHeader*>(content.data());
-        data_ = content.subspan(detail::align_up(sizeof(MemoryHeader), kCacheLineSize));
+        data_ = content.subspan(Details::getMemoryHeaderBufferSize());
         consumerPosCache_ = std::atomic_ref(header_->producerPos).load(std::memory_order_relaxed);
         producerPosCache_ = consumerPosCache_;
 
@@ -201,7 +220,6 @@ public:
                 consumerPosCache_) {
             return {};
         }
-
         lastMessageHeader_ = std::bit_cast<MessageHeader*>(data_.data() + consumerPosCache_);
         return data_.subspan(lastMessageHeader_->payloadOffset, lastMessageHeader_->payloadSize);
     }
@@ -209,8 +227,10 @@ public:
     /// Consume buffer and make buffer space available for producer
     /// pre: fetch() -> non empty buffer
     TURBOQ_FORCE_INLINE void consume() noexcept {
+        assert((reinterpret_cast<std::uintptr_t>(lastMessageHeader_) & (kCacheLineSize - 1)) == 0);
         assert((lastMessageHeader_->payloadOffset & (kCacheLineSize - 1)) == 0);
         assert((lastMessageHeader_->size & (kCacheLineSize - 1)) == 0);
+
         consumerPosCache_ = lastMessageHeader_->payloadOffset + lastMessageHeader_->size;
     }
 
@@ -234,8 +254,9 @@ public:
 template <typename Options>
 class MulticastQueueImpl {
 private:
-    using MemoryHeader = typename MulticastQueueDetail<Options>::MemoryHeader;
-    using MessageHeader = typename MulticastQueueDetail<Options>::MessageHeader;
+    using Details = MulticastQueueDetail<Options>;
+    using MemoryHeader = typename Details::MemoryHeader;
+    using MessageHeader = typename Details::MessageHeader;
 
     File file_;
 
@@ -276,6 +297,7 @@ public:
         }
 
         auto [file, pageSize] = std::move(openMemorySourceResult).value();
+        assert(pageSize > 0 && ((pageSize & (kCacheLineSize - 1)) == 0));
 
         auto getFileSizeResult = file.tryGetFileSize();
         if (!getFileSizeResult) {
@@ -347,8 +369,8 @@ public:
     }
 
     template <typename... Args>
-    [[nodiscard]] static auto makeMulticastQueue(Args&&... args) noexcept
-        -> std::expected<MulticastQueueImpl<Options>, std::error_code> {
+    [[nodiscard]] static auto makeQueue(
+        Args&&... args) noexcept -> std::expected<MulticastQueueImpl<Options>, std::error_code> {
         try {
             return {MulticastQueueImpl{std::forward<Args>(args)...}};
         } catch (std::system_error const& e) {
@@ -357,8 +379,7 @@ public:
     }
 
     template <typename... Args>
-    [[nodiscard]] static auto makeMulticastQueueProducer(Args&&... args) noexcept
-        -> std::expected<Producer, std::error_code> {
+    [[nodiscard]] static auto makeProducer(Args&&... args) noexcept -> std::expected<Producer, std::error_code> {
         try {
             return {MulticastQueueImpl{std::forward<Args>(args)...}.createProducer()};
         } catch (std::system_error const& e) {
@@ -367,8 +388,7 @@ public:
     }
 
     template <typename... Args>
-    [[nodiscard]] static auto makeMulticastQueueConsumer(Args&&... args) noexcept
-        -> std::expected<Consumer, std::error_code> {
+    [[nodiscard]] static auto makeConsumer(Args&&... args) noexcept -> std::expected<Consumer, std::error_code> {
         try {
             return {MulticastQueueImpl{std::forward<Args>(args)...}.createConsumer()};
         } catch (std::system_error const& e) {
