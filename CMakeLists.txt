@@ -12,4 +12,4 @@ CPMAddPackage("gh:doctest/doctest@2.5.2")
 enable_testing()
 
 add_subdirectory(code)
-# add_subdirectory(tools)
+add_subdirectory(tools)
