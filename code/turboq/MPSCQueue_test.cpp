@@ -182,11 +182,62 @@ TEST_SUITE("MPSC") {
         }
     }
 
+    // Regression coverage for a bug where the slot size was computed with the same helper used
+    // for the in-slot message buffer size, which does not round up to a cache line. That made
+    // every slot after the first one start at a non-cache-aligned offset whenever slotSizeHint
+    // itself wasn't already a multiple of the cache line size -- tripping the alignment asserts in
+    // fetch()/consume() (and, in a build without asserts, silently misaligned reads/writes).
+    TEST_CASE("slots stay cache-line aligned when slotSizeHint is not a multiple of the cache line size") {
+        static constexpr std::size_t kOddSlotSizes[] = {1, 3, 7, 13, 33, 63, 65, 100, 127, 129};
+
+        for (auto const slotSizeHint : kOddSlotSizes) {
+            CAPTURE(slotSizeHint);
+            REQUIRE_NE(slotSizeHint % kCacheLineSize, 0u); // sanity-check the test data itself
+
+            auto const queueName = "odd-slot-" + std::to_string(slotSizeHint);
+            auto result = MPSCQueue::makeQueue(
+                queueName, MPSCQueue::CreationOptions{.slotSizeHint = slotSizeHint, .lengthHint = 16},
+                AnonymousMemorySource{});
+            REQUIRE(result);
+
+            auto queue = std::move(result).value();
+            auto producer = queue.createProducer();
+            auto consumer = queue.createConsumer();
+            REQUIRE(producer);
+            REQUIRE(consumer);
+
+            // walk past the ring boundary a few times so every slot index gets exercised, not just #0
+            auto const rounds = producer.length() * 3;
+            for (std::size_t i = 0; i < rounds; ++i) {
+                auto const fill = static_cast<std::byte>(i & 0xFF);
+
+                auto writeBuffer = producer.prepare(slotSizeHint);
+                REQUIRE_FALSE(writeBuffer.empty());
+                REQUIRE_EQ(writeBuffer.size(), slotSizeHint);
+                REQUIRE_EQ(reinterpret_cast<std::uintptr_t>(writeBuffer.data()) % kCacheLineSize, 0u);
+                std::ranges::fill(writeBuffer, fill);
+                producer.commit();
+
+                auto readBuffer = consumer.fetch();
+                REQUIRE_FALSE(readBuffer.empty());
+                REQUIRE_EQ(readBuffer.size(), slotSizeHint);
+                REQUIRE_EQ(reinterpret_cast<std::uintptr_t>(readBuffer.data()) % kCacheLineSize, 0u);
+                REQUIRE(std::ranges::all_of(readBuffer, [fill](std::byte b) {
+                    return b == fill;
+                }));
+                consumer.consume();
+            }
+        }
+    }
+
     TEST_CASE("concurrent producers never corrupt or duplicate messages") {
         constexpr unsigned kProducers = 8;
         constexpr std::uint64_t kPerProducer = 20000;
         constexpr std::uint64_t kTotal = kProducers * kPerProducer;
 
+        // slotSizeHint is deliberately not a multiple of the cache line size, exercising the same
+        // slot-alignment path as the "slots stay cache-line aligned..." test above, but now under
+        // real concurrent producer/consumer contention.
         auto result = MPSCQueue::makeQueue("mpsc-race",
             MPSCQueue::CreationOptions{.slotSizeHint = sizeof(std::uint64_t), .lengthHint = 1024},
             AnonymousMemorySource{});
