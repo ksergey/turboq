@@ -22,7 +22,7 @@ namespace turboq {
 namespace detail {
 
 template <typename Options>
-struct SPSCQueueDetail {
+struct SPSCQueueLayout {
     static constexpr std::string_view kTag = Options::tag;
 
     struct MemoryHeader {
@@ -62,7 +62,7 @@ struct SPSCQueueDetail {
 template <typename Options>
 class SPSCQueueProducerImpl {
 private:
-    using Details = SPSCQueueDetail<Options>;
+    using Details = SPSCQueueLayout<Options>;
     using MemoryHeader = typename Details::MemoryHeader;
     using MessageHeader = typename Details::MessageHeader;
 
@@ -176,7 +176,7 @@ public:
                 return data_.subspan(lastMessageHeader_->payloadOffset, lastMessageHeader_->payloadSize);
             }
 
-            // align payload to cache-line size when payload starts from begining
+            // align payload to cache-line size when payload starts from beginning
             if (payloadBufferSize < consumerPosCache) {
                 lastMessageHeader_ = std::bit_cast<MessageHeader*>(data_.data() + producerPosCache_);
                 lastMessageHeader_->size = payloadBufferSize;
@@ -213,7 +213,7 @@ public:
 template <typename Options>
 class SPSCQueueConsumerImpl {
 private:
-    using Details = SPSCQueueDetail<Options>;
+    using Details = SPSCQueueLayout<Options>;
     using MemoryHeader = typename Details::MemoryHeader;
     using MessageHeader = typename Details::MessageHeader;
 
@@ -311,7 +311,7 @@ public:
 template <typename Options>
 class SPSCQueueImpl {
 private:
-    using Details = SPSCQueueDetail<Options>;
+    using Details = SPSCQueueLayout<Options>;
     using MemoryHeader = typename Details::MemoryHeader;
     using MessageHeader = typename Details::MessageHeader;
 
@@ -388,13 +388,13 @@ public:
         if (fileSize == 0) {
             // init queue internals
             auto header = std::bit_cast<MemoryHeader*>(buffer.data());
-            std::ranges::copy(SPSCQueueDetail<Options>::kTag, header->tag);
+            std::ranges::copy(SPSCQueueLayout<Options>::kTag, header->tag);
             std::atomic_ref(header->producerPos).store(0, std::memory_order_relaxed);
             std::atomic_ref(header->consumerPos).store(0, std::memory_order_relaxed);
         }
 
         auto header = std::bit_cast<MemoryHeader const*>(buffer.data());
-        if (!std::ranges::equal(SPSCQueueDetail<Options>::kTag, header->tag)) {
+        if (!std::ranges::equal(SPSCQueueLayout<Options>::kTag, header->tag)) {
             throw std::system_error{makeErrorCode(Error::TagMismatch), "unexpected queue tag value"};
         }
 
@@ -410,6 +410,19 @@ public:
 
         auto [file, pageSize] = std::move(openMemorySourceResult).value();
 
+        auto getFileSizeResult = file.tryGetFileSize();
+        if (!getFileSizeResult) {
+            throw std::system_error{getFileSizeResult.error(), "failed to get queue file size"};
+        }
+        if (getFileSizeResult.value() < Details::getMemoryHeaderBufferSize()) {
+            // Too small to hold even the memory header: either the queue was never created, or (for
+            // memory sources like AnonymousMemorySource, where "open only" cannot truly look up an
+            // existing mapping by name) a fresh, empty backing file was handed to us instead. Reject
+            // this cleanly -- mapping and dereferencing it would read past the end of the file and
+            // raise SIGBUS rather than a catchable error.
+            throw std::system_error{makeErrorCode(Error::BufferTooSmall), "queue file too small to be a valid queue"};
+        }
+
         auto mapFileResult = MappedRegion::makeMappedRegion(file, pageSize);
         if (!mapFileResult) {
             throw std::system_error{mapFileResult.error(), "failed to map queue file into memory"};
@@ -419,7 +432,7 @@ public:
         auto buffer = memory.content();
 
         auto header = std::bit_cast<MemoryHeader const*>(buffer.data());
-        if (!std::ranges::equal(SPSCQueueDetail<Options>::kTag, header->tag)) {
+        if (!std::ranges::equal(SPSCQueueLayout<Options>::kTag, header->tag)) {
             throw std::system_error{makeErrorCode(Error::TagMismatch), "unexpected queue tag value"};
         }
 
@@ -427,8 +440,8 @@ public:
     }
 
     template <typename... Args>
-    [[nodiscard]] static auto makeQueue(
-        Args&&... args) noexcept -> std::expected<SPSCQueueImpl<Options>, std::error_code> {
+    [[nodiscard]] static auto makeQueue(Args&&... args) noexcept
+        -> std::expected<SPSCQueueImpl<Options>, std::error_code> {
         try {
             return {SPSCQueueImpl{std::forward<Args>(args)...}};
         } catch (std::system_error const& e) {
@@ -454,7 +467,7 @@ public:
         }
     }
 
-    /// Return true on queue intialized
+    /// Return true on queue is initialized
     [[nodiscard]] TURBOQ_FORCE_INLINE explicit operator bool() const noexcept {
         return static_cast<bool>(file_);
     }

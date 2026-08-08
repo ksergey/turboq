@@ -22,7 +22,7 @@ namespace turboq {
 namespace detail {
 
 template <typename Options>
-struct MulticastQueueDetail {
+struct MulticastQueueLayout {
     static constexpr std::string_view kTag = Options::tag;
 
     struct MemoryHeader {
@@ -61,7 +61,7 @@ struct MulticastQueueDetail {
 template <typename Options>
 class MulticastQueueProducerImpl {
 private:
-    using Details = MulticastQueueDetail<Options>;
+    using Details = MulticastQueueLayout<Options>;
     using MemoryHeader = typename Details::MemoryHeader;
     using MessageHeader = typename Details::MessageHeader;
 
@@ -124,7 +124,7 @@ public:
         lastMessageHeader_->size = payloadBufferSize;
         lastMessageHeader_->payloadSize = size;
 
-        // check enought space for current message + additional aligned header
+        // check enough space for current message + additional aligned header
         if (producerPosCache_ + messageBufferSize + headerBufferSize > data_.size()) [[unlikely]] {
             producerPosCache_ = 0;
         } else {
@@ -158,7 +158,7 @@ public:
 template <typename Options>
 class MulticastQueueConsumerImpl {
 private:
-    using Details = MulticastQueueDetail<Options>;
+    using Details = MulticastQueueLayout<Options>;
     using MemoryHeader = typename Details::MemoryHeader;
     using MessageHeader = typename Details::MessageHeader;
 
@@ -254,7 +254,7 @@ public:
 template <typename Options>
 class MulticastQueueImpl {
 private:
-    using Details = MulticastQueueDetail<Options>;
+    using Details = MulticastQueueLayout<Options>;
     using MemoryHeader = typename Details::MemoryHeader;
     using MessageHeader = typename Details::MessageHeader;
 
@@ -331,12 +331,12 @@ public:
         if (fileSize == 0) {
             // init queue internals
             auto header = std::bit_cast<MemoryHeader*>(buffer.data());
-            std::ranges::copy(MulticastQueueDetail<Options>::kTag, header->tag);
+            std::ranges::copy(MulticastQueueLayout<Options>::kTag, header->tag);
             std::atomic_ref(header->producerPos).store(0, std::memory_order_relaxed);
         }
 
         auto header = std::bit_cast<MemoryHeader const*>(buffer.data());
-        if (!std::ranges::equal(MulticastQueueDetail<Options>::kTag, header->tag)) {
+        if (!std::ranges::equal(MulticastQueueLayout<Options>::kTag, header->tag)) {
             throw std::system_error{makeErrorCode(Error::TagMismatch), "unexpected queue tag value"};
         }
 
@@ -352,6 +352,14 @@ public:
 
         auto [file, pageSize] = std::move(openMemorySourceResult).value();
 
+        auto getFileSizeResult = file.tryGetFileSize();
+        if (!getFileSizeResult) {
+            throw std::system_error{getFileSizeResult.error(), "failed to get queue file size"};
+        }
+        if (getFileSizeResult.value() < Details::getMemoryHeaderBufferSize()) {
+            throw std::system_error{makeErrorCode(Error::BufferTooSmall), "queue file too small to be a valid queue"};
+        }
+
         auto mapFileResult = MappedRegion::makeMappedRegion(file, pageSize);
         if (!mapFileResult) {
             throw std::system_error{mapFileResult.error(), "failed to map queue file into memory"};
@@ -361,7 +369,7 @@ public:
         auto buffer = memory.content();
 
         auto header = std::bit_cast<MemoryHeader const*>(buffer.data());
-        if (!std::ranges::equal(MulticastQueueDetail<Options>::kTag, header->tag)) {
+        if (!std::ranges::equal(MulticastQueueLayout<Options>::kTag, header->tag)) {
             throw std::system_error{makeErrorCode(Error::TagMismatch), "unexpected queue tag value"};
         }
 
@@ -369,8 +377,8 @@ public:
     }
 
     template <typename... Args>
-    [[nodiscard]] static auto makeQueue(
-        Args&&... args) noexcept -> std::expected<MulticastQueueImpl<Options>, std::error_code> {
+    [[nodiscard]] static auto makeQueue(Args&&... args) noexcept
+        -> std::expected<MulticastQueueImpl<Options>, std::error_code> {
         try {
             return {MulticastQueueImpl{std::forward<Args>(args)...}};
         } catch (std::system_error const& e) {
@@ -396,7 +404,7 @@ public:
         }
     }
 
-    /// Return true on queue intialized
+    /// Return true on queue is initialized
     [[nodiscard]] TURBOQ_FORCE_INLINE explicit operator bool() const noexcept {
         return static_cast<bool>(file_);
     }

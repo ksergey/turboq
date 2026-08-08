@@ -22,7 +22,7 @@ namespace turboq {
 namespace detail {
 
 template <typename Options>
-struct MPSCQueueDetail {
+struct MPSCQueueLayout {
     static constexpr std::string_view kTag = Options::tag;
 
     struct MemoryHeader {
@@ -38,7 +38,7 @@ struct MPSCQueueDetail {
     };
 
     struct StateHeader {
-        alignas(kCacheLineSize) bool commited;
+        alignas(kCacheLineSize) bool committed;
     };
 
     static_assert(std::atomic_ref<std::size_t>::is_always_lock_free);
@@ -63,7 +63,7 @@ struct MPSCQueueDetail {
 template <typename Options>
 class MPSCQueueProducerImpl {
 private:
-    using Details = MPSCQueueDetail<Options>;
+    using Details = MPSCQueueLayout<Options>;
     using MemoryHeader = typename Details::MemoryHeader;
     using MessageHeader = typename Details::MessageHeader;
     using StateHeader = typename Details::StateHeader;
@@ -146,8 +146,8 @@ public:
         }
 
         while (!std::atomic_ref(header_->producerPos)
-                    .compare_exchange_weak(currentProducerPos, currentProducerPos + 1, std::memory_order_release,
-                        std::memory_order_relaxed)) [[unlikely]] {
+                .compare_exchange_weak(currentProducerPos, currentProducerPos + 1, std::memory_order_release,
+                    std::memory_order_relaxed)) [[unlikely]] {
             if (currentProducerPos - consumerPosCache_ >= header_->length) [[unlikely]] {
                 return {};
             }
@@ -162,7 +162,7 @@ public:
 
     /// Make reserved buffer visible for consumers
     TURBOQ_FORCE_INLINE void commit() noexcept {
-        std::atomic_ref(commitStates_[producerPosCache_].commited).store(true, std::memory_order_release);
+        std::atomic_ref(commitStates_[producerPosCache_].committed).store(true, std::memory_order_release);
     }
 
     /// \overload
@@ -181,7 +181,7 @@ public:
 template <typename Options>
 class MPSCQueueConsumerImpl {
 private:
-    using Details = MPSCQueueDetail<Options>;
+    using Details = MPSCQueueLayout<Options>;
     using MemoryHeader = typename Details::MemoryHeader;
     using MessageHeader = typename Details::MessageHeader;
     using StateHeader = typename Details::StateHeader;
@@ -205,7 +205,7 @@ public:
           producerPosCache_{std::exchange(other.producerPosCache_, 0)},
           consumerPosCache_{std::exchange(other.consumerPosCache_, 0)},
           lastMessageHeader_{std::exchange(other.lastMessageHeader_, nullptr)},
-          lastCommitState_{std::exchange(other.lastMessageHeader_, nullptr)} {}
+          lastCommitState_{std::exchange(other.lastCommitState_, nullptr)} {}
 
     MPSCQueueConsumerImpl& operator=(MPSCQueueConsumerImpl&& other) noexcept {
         if (this != &other) {
@@ -265,7 +265,7 @@ public:
         lastCommitState_ = &commitStates_[consumerPos];
         assert((reinterpret_cast<uintptr_t>(lastCommitState_) & (kCacheLineSize - 1)) == 0);
 
-        if (!std::atomic_ref(lastCommitState_->commited).load(std::memory_order_acquire)) [[unlikely]] {
+        if (!std::atomic_ref(lastCommitState_->committed).load(std::memory_order_acquire)) [[unlikely]] {
             return {};
         }
 
@@ -282,7 +282,7 @@ public:
         assert((reinterpret_cast<std::uintptr_t>(lastMessageHeader_) & (kCacheLineSize - 1)) == 0);
 
         consumerPosCache_++;
-        std::atomic_ref(lastCommitState_->commited).store(false, std::memory_order_release);
+        std::atomic_ref(lastCommitState_->committed).store(false, std::memory_order_release);
         std::atomic_ref(header_->consumerPos).store(consumerPosCache_, std::memory_order_release);
     }
 
@@ -292,7 +292,7 @@ public:
             // Drop message.
             std::size_t const consumerPos = consumerPosCache_ & (header_->length - 1);
             lastCommitState_ = &commitStates_[consumerPos];
-            std::atomic_ref(lastCommitState_->commited).store(false, std::memory_order_release);
+            std::atomic_ref(lastCommitState_->committed).store(false, std::memory_order_release);
             consumerPosCache_++;
         }
         std::atomic_ref(header_->consumerPos).store(consumerPosCache_, std::memory_order_release);
@@ -302,7 +302,7 @@ public:
 template <typename Options>
 class MPSCQueueImpl {
 private:
-    using Details = MPSCQueueDetail<Options>;
+    using Details = MPSCQueueLayout<Options>;
     using MemoryHeader = typename Details::MemoryHeader;
     using MessageHeader = typename Details::MessageHeader;
     using StateHeader = typename Details::StateHeader;
@@ -342,7 +342,7 @@ public:
                 makeErrorCode(Error::InvalidCreationOptions), "invalid max message size hint value"};
         }
         if (options.lengthHint == 0) {
-            throw std::system_error{makeErrorCode(Error::InvalidCreationOptions), "invalid lenght hint value"};
+            throw std::system_error{makeErrorCode(Error::InvalidCreationOptions), "invalid length hint value"};
         }
 
         auto openMemorySourceResult = memorySource.open(name, MemorySource::OpenOrCreate);
@@ -389,7 +389,7 @@ public:
         if (fileSize == 0) {
             // init queue internals
             auto header = std::bit_cast<MemoryHeader*>(buffer.data());
-            std::ranges::copy(MPSCQueueDetail<Options>::kTag, header->tag);
+            std::ranges::copy(MPSCQueueLayout<Options>::kTag, header->tag);
             header->slotSize = slotSize;
             header->length = length;
             std::atomic_ref(header->producerPos).store(0, std::memory_order_relaxed);
@@ -397,7 +397,7 @@ public:
         }
 
         auto header = std::bit_cast<MemoryHeader const*>(buffer.data());
-        if (!std::ranges::equal(MPSCQueueDetail<Options>::kTag, header->tag)) {
+        if (!std::ranges::equal(MPSCQueueLayout<Options>::kTag, header->tag)) {
             throw std::system_error{makeErrorCode(Error::TagMismatch), "unexpected queue tag value"};
         }
 
@@ -413,6 +413,14 @@ public:
 
         auto [file, pageSize] = std::move(openMemorySourceResult).value();
 
+        auto getFileSizeResult = file.tryGetFileSize();
+        if (!getFileSizeResult) {
+            throw std::system_error{getFileSizeResult.error(), "failed to get queue file size"};
+        }
+        if (getFileSizeResult.value() < Details::getMemoryHeaderBufferSize()) {
+            throw std::system_error{makeErrorCode(Error::BufferTooSmall), "queue file too small to be a valid queue"};
+        }
+
         auto mapFileResult = MappedRegion::makeMappedRegion(file, pageSize);
         if (!mapFileResult) {
             throw std::system_error{mapFileResult.error(), "failed to map queue file into memory"};
@@ -422,7 +430,7 @@ public:
         auto buffer = memory.content();
 
         auto header = std::bit_cast<MemoryHeader const*>(buffer.data());
-        if (!std::ranges::equal(MPSCQueueDetail<Options>::kTag, header->tag)) {
+        if (!std::ranges::equal(MPSCQueueLayout<Options>::kTag, header->tag)) {
             throw std::system_error{makeErrorCode(Error::TagMismatch), "unexpected queue tag value"};
         }
 
@@ -430,8 +438,8 @@ public:
     }
 
     template <typename... Args>
-    [[nodiscard]] static auto makeQueue(
-        Args&&... args) noexcept -> std::expected<MPSCQueueImpl<Options>, std::error_code> {
+    [[nodiscard]] static auto makeQueue(Args&&... args) noexcept
+        -> std::expected<MPSCQueueImpl<Options>, std::error_code> {
         try {
             return {MPSCQueueImpl{std::forward<Args>(args)...}};
         } catch (std::system_error const& e) {
@@ -457,7 +465,7 @@ public:
         }
     }
 
-    /// Return true on queue intialized
+    /// Return true on queue is initialized
     [[nodiscard]] TURBOQ_FORCE_INLINE explicit operator bool() const noexcept {
         return static_cast<bool>(file_);
     }
