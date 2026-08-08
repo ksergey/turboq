@@ -57,6 +57,10 @@ struct MPSCQueueLayout {
     static constexpr auto adjustMessageBufferSize(std::size_t payloadSize) noexcept -> std::size_t {
         return getMessageHeaderBufferSize() + payloadSize;
     }
+
+    static constexpr auto adjustSlotBufferSize(std::size_t payloadSize) noexcept -> std::size_t {
+        return getMessageHeaderBufferSize() + detail::align_up(payloadSize, kCacheLineSize);
+    }
 };
 
 /// MPSC queue producer
@@ -360,7 +364,7 @@ public:
 
         auto const fileSize = getFileSizeResult.value();
 
-        auto const slotSize = Details::adjustMessageBufferSize(options.slotSizeHint);
+        auto const slotSize = Details::adjustSlotBufferSize(options.slotSizeHint);
         auto const length = detail::upper_pow_2(options.lengthHint);
         auto const capacityHint =
             Details::getMemoryHeaderBufferSize() + slotSize * length + sizeof(StateHeader) * length;
