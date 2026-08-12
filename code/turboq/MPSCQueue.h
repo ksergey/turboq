@@ -308,6 +308,30 @@ public:
     }
 };
 
+/// Memory layout:
+///
+///    MemoryHeader                      data_ (length fixed-size slots)                commitStates_
+///   +------------------------+----------+----------+----------+     +----------+----+----+-----+----+
+///   | tag | slotSize | length| Slot 0   | Slot 1   | Slot 2   | ... | Slot N-1 |  StateHeader[0..N-1]|
+///   | consumerPos|producerPos|          |          |          |     |          |  (1 cache line each)|
+///   +------------------------+----------+----------+----------+     +----------+----+----+-----+----+
+///
+/// Unlike SPSC/MulticastQueue, this is a *fixed-size circular array* of `length` slots (always a
+/// power of two), not a variable-size byte ring: slot index = producerPos & (length - 1), so a
+/// given slot always lives at the same byte offset no matter how many times the ring has wrapped.
+/// Each slot is laid out as:
+///
+///   +--------+--------------------------------------+
+///   | Header | Payload (up to slotSize - sizeof(Header) bytes) |
+///   +--------+--------------------------------------+
+///
+/// commitStates_ is a *separate* array living after all the slots, one StateHeader per slot, each
+/// padded out to its own cache line. A producer reserves a slot via compare_exchange on
+/// producerPos, writes the message into it, then flips commitStates_[slot].committed = true --
+/// kept apart from the slot data so a consumer can poll "is slot N ready yet?" without touching
+/// (and dirtying the cache line of) the payload itself. Keeping reservation (producerPos) and
+/// publication (committed) as two separate steps is also what lets several producers write to
+/// different slots concurrently: each one only ever owns the exact slot it CAS'd for.
 template <typename Options>
 class MPSCQueueImpl {
 private:

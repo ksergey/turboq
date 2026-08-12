@@ -302,15 +302,34 @@ public:
     }
 };
 
-/// Queue layout:
+/// Memory layout:
+///
+///    MemoryHeader                                    data_ (ring buffer of variable-size messages)
+///   +--------------------------------+---------------------------------------------------------------+
+///   | tag | producerPos | consumerPos| Header | Payload | Header | Payload | ...  |    free space      |
+///   +--------------------------------+---------------------------------------------------------------+
+///    each field cache-line aligned    ^ each Header/Payload pair cache-line aligned
+///
+/// producerPos/consumerPos are byte offsets into data_ (not message counts). Every message is a
+/// {MessageHeader, payload} pair; MessageHeader::payloadOffset points at where its payload
+/// actually lives, so a header need not be immediately followed by its own payload -- that's what
+/// makes wrap-around work without a separate "wrapped" flag:
+///
 /// s               e   s                      e  s                    e
 /// +---------------+---+--------+-+------------+--+--------+-+----------+-----+----
 /// | MemoryHeader  |xxx| Header |x|Payload     |xx| Header |x| Payload  |xxxxx|uuuu ...
 /// +---------------+---+--------+-+------------+--+--------+-+----------+-----+----
 /// s   - start
 /// e   - end
-/// xxx - padding bytes
-/// uuu - unused bytes
+/// xxx - padding bytes (alignment)
+/// uuu - unused tail bytes
+///
+/// When a message doesn't fit in the remaining space before the end of data_, the producer still
+/// writes its Header at the current (tail) position -- there must always be room for at least a
+/// bare header there, see minFreeSpace_ -- but sets that header's payloadOffset to 0 and places
+/// the payload at the very start of data_ instead of right after the header. The consumer follows
+/// payloadOffset wherever it points, so this single embedded pointer *is* the wrap marker; the
+/// bytes left over at the tail (uuu above) are simply never revisited until the ring wraps again.
 
 template <typename Options>
 class SPSCQueueImpl {

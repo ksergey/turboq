@@ -294,15 +294,39 @@ public:
     }
 };
 
-/// Queue layout:
+/// Memory layout:
+///
+///    MemoryHeader        data_ (ring buffer of variable-size messages, wraps just like SPSC's)
+///   +----------------+-----------------------------------------------------------------------+
+///   | tag |producerPos|  Header | Payload |  Header | Payload | ...        |    free space    |
+///   +----------------+-----------------------------------------------------------------------+
+///    cache-line aligned
+///
 /// s               e   s                      e  s                    e
 /// +---------------+---+--------+-+------------+--+--------+-+----------+-----+----
 /// | MemoryHeader  |xxx| Header |x|Payload     |xx| Header |x| Payload  |xxxxx|uuuu ...
 /// +---------------+---+--------+-+------------+--+--------+-+----------+-----+----
 /// s   - start
 /// e   - end
-/// xxx - padding bytes
-/// uuu - unused bytes
+/// xxx - padding bytes (alignment)
+/// uuu - unused tail bytes
+///
+/// Same variable-size ring and wrap-via-payloadOffset trick as SPSCQueue (see SPSCQueue.h for the
+/// full explanation) -- but with two deliberate differences that follow from this being a
+/// broadcast queue, not a point-to-point one:
+///
+///  - No consumerPos in MemoryHeader. There's no single "the consumer" position to publish: any
+///    number of independent consumers can attach and read the same stream, each tracking its own
+///    position purely locally, never written back to shared memory.
+///  - No backpressure as a direct consequence: the producer never checks how far behind any
+///    consumer is, and will happily overwrite data a slow consumer hasn't read yet -- a slow
+///    consumer must never be able to stall the producer or other consumers.
+///
+/// Since the producer can't be held back, MessageHeader carries one extra field a plain SPSC
+/// message doesn't need: `sequence`, a monotonically increasing per-producer counter. A consumer
+/// that reads a sequence it didn't expect knows the slot it just looked at has since been
+/// overwritten -- i.e. it has been lapped -- and reports that through fetch()'s FetchResult
+/// instead of handing back a stale or out-of-context message. See fetch() below.
 
 template <typename Options>
 class MulticastQueueImpl {
