@@ -13,6 +13,7 @@
 #include <utility>
 
 #include "Error.h"
+#include "FetchResult.h"
 #include "MappedRegion.h"
 #include "MemorySource.h"
 #include "Platform.h"
@@ -268,19 +269,22 @@ public:
         return storage_.size();
     }
 
-    /// Get next buffer for reading. Return empty buffer in case of no data.
-    [[nodiscard]] TURBOQ_FORCE_INLINE auto fetch() noexcept -> std::span<std::byte const> {
+    /// Get next buffer for reading. Returns a result with size==0 when there is no data yet. This
+    /// queue applies backpressure to its producer (see prepare()), so it can never be lapped --
+    /// fetch() here never returns an error result. It's still FetchResult (not a bare span) so the
+    /// Consumer interface is uniform across all three queue types.
+    [[nodiscard]] TURBOQ_FORCE_INLINE auto fetch() noexcept -> FetchResult {
         if (consumerPosCache_ == producerPosCache_ &&
             (producerPosCache_ = std::atomic_ref(header_->producerPos).load(std::memory_order_acquire)) ==
                 consumerPosCache_) [[unlikely]] {
             return {};
         }
         lastMessageHeader_ = std::bit_cast<MessageHeader*>(data_.data() + consumerPosCache_);
-        return data_.subspan(lastMessageHeader_->payloadOffset, lastMessageHeader_->payloadSize);
+        return {data_.subspan(lastMessageHeader_->payloadOffset, lastMessageHeader_->payloadSize)};
     }
 
     /// Consume buffer and make buffer space available for producer
-    /// pre: fetch() -> non empty buffer
+    /// pre: fetch() -> non-empty, non-error result
     TURBOQ_FORCE_INLINE void consume() noexcept {
         assert((reinterpret_cast<std::uintptr_t>(lastMessageHeader_) & (kCacheLineSize - 1)) == 0);
         assert((lastMessageHeader_->payloadOffset & (kCacheLineSize - 1)) == 0);

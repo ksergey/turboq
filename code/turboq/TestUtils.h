@@ -45,11 +45,11 @@ template <typename ProducerT, typename DataT>
 template <typename ConsumerT, typename DataT>
     requires Consumer<ConsumerT> and std::is_trivially_copyable_v<DataT>
 [[nodiscard]] auto dequeue(ConsumerT& consumer, DataT& data) -> bool {
-    auto buffer = consumer.fetch();
-    if (buffer.empty()) {
+    auto result = consumer.fetch();
+    if (!result || result.empty()) {
         return false;
     }
-    data = *std::bit_cast<DataT const*>(buffer.data());
+    data = *std::bit_cast<DataT const*>(result.value().data());
     consumer.consume();
     return true;
 }
@@ -57,11 +57,11 @@ template <typename ConsumerT, typename DataT>
 template <typename ConsumerT, typename DataT>
     requires Consumer<ConsumerT> and std::is_trivially_copyable_v<DataT>
 [[nodiscard]] auto fetch(ConsumerT& consumer, DataT& data) -> bool {
-    auto buffer = consumer.fetch();
-    if (buffer.empty()) {
+    auto result = consumer.fetch();
+    if (!result || result.empty()) {
         return false;
     }
-    data = *std::bit_cast<DataT const*>(buffer.data());
+    data = *std::bit_cast<DataT const*>(result.value().data());
     return true;
 }
 

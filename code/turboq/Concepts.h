@@ -7,6 +7,8 @@
 #include <cstddef>
 #include <span>
 
+#include "FetchResult.h"
+
 namespace turboq {
 
 /// Checks T is Producer type
@@ -20,7 +22,7 @@ concept Producer = requires(T obj, std::size_t size) {
 /// Checks T is Consumer type
 template <typename T>
 concept Consumer = requires(T obj) {
-    { obj.fetch() } -> std::same_as<std::span<std::byte const>>;
+    { obj.fetch() } -> std::same_as<FetchResult>;
     { obj.consume() } -> std::same_as<void>;
     { obj.reset() } -> std::same_as<void>;
 };

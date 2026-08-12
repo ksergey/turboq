@@ -195,9 +195,8 @@ TEST_SUITE("MPSC") {
             REQUIRE_NE(slotSizeHint % kCacheLineSize, 0u); // sanity-check the test data itself
 
             auto const queueName = "odd-slot-" + std::to_string(slotSizeHint);
-            auto result = MPSCQueue::makeQueue(
-                queueName, MPSCQueue::CreationOptions{.slotSizeHint = slotSizeHint, .lengthHint = 16},
-                AnonymousMemorySource{});
+            auto result = MPSCQueue::makeQueue(queueName,
+                MPSCQueue::CreationOptions{.slotSizeHint = slotSizeHint, .lengthHint = 16}, AnonymousMemorySource{});
             REQUIRE(result);
 
             auto queue = std::move(result).value();
@@ -218,8 +217,10 @@ TEST_SUITE("MPSC") {
                 std::ranges::fill(writeBuffer, fill);
                 producer.commit();
 
-                auto readBuffer = consumer.fetch();
-                REQUIRE_FALSE(readBuffer.empty());
+                auto readResult = consumer.fetch();
+                REQUIRE(readResult);
+                REQUIRE_FALSE(readResult.empty());
+                auto readBuffer = readResult.value();
                 REQUIRE_EQ(readBuffer.size(), slotSizeHint);
                 REQUIRE_EQ(reinterpret_cast<std::uintptr_t>(readBuffer.data()) % kCacheLineSize, 0u);
                 REQUIRE(std::ranges::all_of(readBuffer, [fill](std::byte b) {
@@ -281,12 +282,12 @@ TEST_SUITE("MPSC") {
         std::vector<bool> seen(kTotal, false);
         std::uint64_t received = 0;
         while (received < kTotal) {
-            auto buffer = consumer.fetch();
-            if (buffer.empty()) {
+            auto result = consumer.fetch();
+            if (result.empty()) {
                 std::this_thread::yield();
                 continue;
             }
-            auto const seq = *std::bit_cast<std::uint64_t const*>(buffer.data());
+            auto const seq = *std::bit_cast<std::uint64_t const*>(result.value().data());
             REQUIRE_LT(seq, kTotal);
             REQUIRE_FALSE(seen[seq]); // no duplicate delivery, no corrupted payload
             seen[seq] = true;

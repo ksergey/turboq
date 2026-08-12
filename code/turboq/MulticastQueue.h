@@ -13,6 +13,7 @@
 #include <utility>
 
 #include "Error.h"
+#include "FetchResult.h"
 #include "MappedRegion.h"
 #include "MemorySource.h"
 #include "Platform.h"
@@ -34,6 +35,13 @@ struct MulticastQueueLayout {
         std::size_t size; // aligned payload size
         std::size_t payloadOffset;
         std::size_t payloadSize;
+        // Monotonically increasing per-producer message counter, stamped in prepare(). A consumer
+        // that reads a sequence it didn't expect knows this slot has been overwritten one or more
+        // times since it last looked -- i.e. it has been lapped by the producer. This is the *only*
+        // signal used for overrun detection: there is no separate flow-control counter, by design
+        // (this queue intentionally has no backpressure -- a slow consumer must never be able to
+        // stall the producer or other consumers).
+        std::size_t sequence;
     };
 
     static_assert(std::atomic_ref<std::size_t>::is_always_lock_free);
@@ -70,6 +78,7 @@ private:
     MemoryHeader* header_{nullptr};
     std::size_t producerPosCache_{0};
     MessageHeader* lastMessageHeader_{nullptr};
+    std::size_t nextSequence_{1}; // 1-based; matches the "no prior baseline" sentinel used by the consumer
 
 public:
     MulticastQueueProducerImpl() = default;
@@ -78,7 +87,8 @@ public:
     MulticastQueueProducerImpl(MulticastQueueProducerImpl&& other) noexcept
         : storage_{std::move(other.storage_)}, data_{std::move(other.data_)},
           header_{std::exchange(other.header_, nullptr)}, producerPosCache_{std::exchange(other.producerPosCache_, 0)},
-          lastMessageHeader_{std::exchange(other.lastMessageHeader_, nullptr)} {}
+          lastMessageHeader_{std::exchange(other.lastMessageHeader_, nullptr)},
+          nextSequence_{std::exchange(other.nextSequence_, 1)} {}
 
     MulticastQueueProducerImpl& operator=(MulticastQueueProducerImpl&& other) noexcept {
         if (this != &other) {
@@ -123,6 +133,7 @@ public:
         lastMessageHeader_ = std::bit_cast<MessageHeader*>(data_.data() + producerPosCache_);
         lastMessageHeader_->size = payloadBufferSize;
         lastMessageHeader_->payloadSize = size;
+        lastMessageHeader_->sequence = nextSequence_++;
 
         // check enough space for current message + additional aligned header
         if (producerPosCache_ + messageBufferSize + headerBufferSize > data_.size()) [[unlikely]] {
@@ -168,6 +179,11 @@ private:
     std::size_t consumerPosCache_{0};
     std::size_t producerPosCache_{0};
     MessageHeader* lastMessageHeader_{nullptr};
+    std::size_t expectedSequence_{0};  // meaningful only when haveExpectedSequence_ is true
+    bool haveExpectedSequence_{false}; // false right after construction/reset/an overrun: next
+                                       // fetch() just baselines on whatever sequence it sees,
+                                       // rather than comparing against a stale expectation
+    std::size_t overrunCount_{0};      // cumulative count of detected laps, since this consumer was created
 
 public:
     MulticastQueueConsumerImpl() = default;
@@ -177,12 +193,15 @@ public:
         : storage_{std::move(other.storage_)}, data_{std::move(other.data_)},
           header_{std::exchange(other.header_, nullptr)}, consumerPosCache_{std::exchange(other.consumerPosCache_, 0)},
           producerPosCache_{std::exchange(other.producerPosCache_, 0)},
-          lastMessageHeader_{std::exchange(other.lastMessageHeader_, nullptr)} {}
+          lastMessageHeader_{std::exchange(other.lastMessageHeader_, nullptr)},
+          expectedSequence_{std::exchange(other.expectedSequence_, 0)},
+          haveExpectedSequence_{std::exchange(other.haveExpectedSequence_, false)},
+          overrunCount_{std::exchange(other.overrunCount_, 0)} {}
 
     MulticastQueueConsumerImpl& operator=(MulticastQueueConsumerImpl&& other) noexcept {
         if (this != &other) {
             this->~MulticastQueueConsumerImpl();
-            new (this) MulticastQueueConsumerImpl(std::move(other));
+            new (this) MulticastQueueConsumerImpl{std::move(other)};
         }
         return *this;
     }
@@ -213,19 +232,44 @@ public:
         return storage_.size();
     }
 
-    /// Get next buffer for reading. Return empty buffer in case of no data.
-    [[nodiscard]] TURBOQ_FORCE_INLINE auto fetch() noexcept -> std::span<std::byte const> {
+    /// Get next buffer for reading.
+    ///   - size > 0  -- a message
+    ///   - size == 0 -- no new data right now, try again later
+    ///   - error(Overrun) -- lapped by the producer, some messages were lost. The consumer has
+    ///     already been resynced to the producer's current position; just call fetch() again.
+    [[nodiscard]] TURBOQ_FORCE_INLINE auto fetch() noexcept -> FetchResult {
         if (producerPosCache_ == consumerPosCache_ &&
             (producerPosCache_ = std::atomic_ref(header_->producerPos).load(std::memory_order_acquire)) ==
                 consumerPosCache_) {
             return {};
         }
+
         lastMessageHeader_ = std::bit_cast<MessageHeader*>(data_.data() + consumerPosCache_);
-        return data_.subspan(lastMessageHeader_->payloadOffset, lastMessageHeader_->payloadSize);
+        auto const sequence = lastMessageHeader_->sequence;
+
+        if (!haveExpectedSequence_) [[unlikely]] {
+            haveExpectedSequence_ = true;
+        } else if (sequence != expectedSequence_) [[unlikely]] {
+            // This slot has been overwritten one or more times since we last looked at it: we've
+            // been lapped by the producer. We deliberately don't use payloadOffset/payloadSize from
+            // this header at all -- they may belong to a later message we're not interested in, or
+            // (if the producer happens to be overwriting this exact slot right now) be a torn read
+            // of a header that's actively being written. Either way, jump straight to the
+            // producer's current position (same recovery as reset()) instead of trying to figure
+            // out how many messages were lost or salvage anything from this slot.
+            ++overrunCount_;
+            consumerPosCache_ = std::atomic_ref(header_->producerPos).load(std::memory_order_acquire);
+            producerPosCache_ = consumerPosCache_;
+            haveExpectedSequence_ = false;
+            return FetchResult{FetchError::Overrun};
+        }
+
+        expectedSequence_ = sequence + 1;
+        return {data_.subspan(lastMessageHeader_->payloadOffset, lastMessageHeader_->payloadSize)};
     }
 
     /// Consume buffer and make buffer space available for producer
-    /// pre: fetch() -> non empty buffer
+    /// pre: fetch() -> non-empty, non-error result
     TURBOQ_FORCE_INLINE void consume() noexcept {
         assert((reinterpret_cast<std::uintptr_t>(lastMessageHeader_) & (kCacheLineSize - 1)) == 0);
         assert((lastMessageHeader_->payloadOffset & (kCacheLineSize - 1)) == 0);
@@ -234,10 +278,19 @@ public:
         consumerPosCache_ = lastMessageHeader_->payloadOffset + lastMessageHeader_->size;
     }
 
+    /// Cumulative number of times this consumer detected it had been lapped by the producer (see
+    /// fetch()), since it was created or last reset(). fetch() already reports each individual
+    /// overrun as it happens (via FetchResult::error()); this is for monitoring/logging a running
+    /// total without having to be the call site that observed every single one.
+    [[nodiscard]] TURBOQ_FORCE_INLINE auto overrunCount() const noexcept -> std::size_t {
+        return overrunCount_;
+    }
+
     /// Reset queue
     TURBOQ_FORCE_INLINE void reset() noexcept {
         consumerPosCache_ = std::atomic_ref(header_->producerPos).load(std::memory_order_relaxed);
         producerPosCache_ = consumerPosCache_;
+        haveExpectedSequence_ = false;
     }
 };
 

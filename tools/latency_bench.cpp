@@ -180,9 +180,18 @@ auto runConsumer(ConsumerT& consumer, Config const& cfg) -> bool {
     auto lastActivity = startTime;
 
     std::uint64_t received = 0;
+    std::uint64_t overruns = 0;
     while (received < totalExpected && !bench::signalHandler().terminationRequested()) {
-        auto buffer = consumer.fetch();
-        if (buffer.empty()) {
+        auto result = consumer.fetch();
+        if (!result) {
+            // Only Multicast consumers can actually take this path (see FetchResult); the
+            // position has already been resynced to the producer's current head, so just loop
+            // back around and keep going.
+            ++overruns;
+            lastActivity = bench::clockNow();
+            continue;
+        }
+        if (result.empty()) {
             if (bench::clockNow() - lastActivity > idleThresholdNs) {
                 std::fprintf(stderr, "WARNING: idle timeout reached, stopping early (%llu/%llu received)\n",
                     static_cast<unsigned long long>(received), static_cast<unsigned long long>(totalExpected));
@@ -192,7 +201,7 @@ auto runConsumer(ConsumerT& consumer, Config const& cfg) -> bool {
         }
 
         auto const now = bench::clockNow();
-        auto const* msg = std::bit_cast<bench::Message const*>(buffer.data());
+        auto const* msg = std::bit_cast<bench::Message const*>(result.value().data());
 
         // msg->seq is 1-based and offset by producerId * cfg.count (see runProducer); recover which
         // producer's range it falls in and validate that sub-range independently.
@@ -236,6 +245,10 @@ auto runConsumer(ConsumerT& consumer, Config const& cfg) -> bool {
         static_cast<unsigned long long>(totalExpected));
     std::printf("elapsed        : %.3f sec (%.0f msg/s)\n", elapsedSec,
         elapsedSec > 0 ? static_cast<double>(received) / elapsedSec : 0.0);
+    if (overruns != 0) {
+        std::printf("overruns       : %llu (multicast only -- consumer was lapped by the producer)\n",
+            static_cast<unsigned long long>(overruns));
+    }
     std::printf("sequence check : %s (missing=%llu, out-of-order/duplicate=%llu)\n", allValid ? "OK" : "FAILED",
         static_cast<unsigned long long>(totalMissing), static_cast<unsigned long long>(totalAnomalies));
 
