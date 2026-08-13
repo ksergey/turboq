@@ -378,7 +378,7 @@ int main(int argc, char* argv[]) {
             std::fprintf(stderr, "ERROR: --producer-id must be < --producers\n");
             return EXIT_FAILURE;
         }
-        if (cfg.warmup >= cfg.count) {
+        if (cfg.role == Role::Consumer && cfg.warmup >= cfg.count) {
             std::fprintf(stderr, "ERROR: --warmup must be less than --count\n");
             return EXIT_FAILURE;
         }
