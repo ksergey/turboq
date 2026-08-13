@@ -32,6 +32,7 @@
 #include <turboq/MPSCQueue.h>
 #include <turboq/MulticastQueue.h>
 #include <turboq/SPSCQueue.h>
+#include <turboq/Utils.h>
 
 #include "Common.h"
 
@@ -90,8 +91,9 @@ void waitUntil(std::int64_t deadlineNs) noexcept {
         auto const remaining = deadlineNs - now;
         if (remaining > kSpinThresholdNs) {
             std::this_thread::sleep_for(std::chrono::nanoseconds(remaining - kSpinThresholdNs));
+        } else {
+            turboq::cpuRelax(); // busy-spin through the last sub-200us stretch for precise pacing
         }
-        // else: busy-spin through the last sub-200us stretch for precise pacing
     }
 }
 
@@ -132,6 +134,7 @@ void runProducer(ProducerT& producer, Config const& cfg) {
                 std::printf("interrupted while waiting for free space\n");
                 return;
             }
+            turboq::cpuRelax();
         }
 
         if (buffer.size() > sizeof(bench::Message)) {
@@ -189,6 +192,7 @@ auto runConsumer(ConsumerT& consumer, Config const& cfg) -> bool {
             // back around and keep going.
             ++overruns;
             lastActivity = bench::clockNow();
+            turboq::cpuRelax();
             continue;
         }
         if (result.empty()) {
@@ -197,7 +201,8 @@ auto runConsumer(ConsumerT& consumer, Config const& cfg) -> bool {
                     static_cast<unsigned long long>(received), static_cast<unsigned long long>(totalExpected));
                 break;
             }
-            continue; // spin-wait: lowest latency, matches the queue's low-latency design
+            turboq::cpuRelax(); // spin-wait: lowest latency, matches the queue's low-latency design
+            continue;
         }
 
         auto const now = bench::clockNow();
