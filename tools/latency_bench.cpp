@@ -24,6 +24,7 @@
 #include <chrono>
 #include <cstdio>
 #include <cstring>
+#include <format>
 #include <string>
 #include <thread>
 
@@ -38,6 +39,14 @@
 #include "Common.h"
 
 namespace {
+
+struct BenchmarkError : public std::runtime_error {
+    using std::runtime_error::runtime_error;
+
+    template <typename... Args>
+    BenchmarkError(std::format_string<Args...> fmt, Args&&... args)
+        : std::runtime_error{std::format(fmt, std::forward<Args>(args)...)} {}
+};
 
 enum class Role { Producer, Consumer };
 enum class QueueType { SPSC, MPSC, Multicast };
@@ -58,6 +67,7 @@ struct Config {
     turboq::HugePagesOption hugePages; // where the queue's backing memory is allocated (see --hugepages);
                                        // producer and consumer must agree on this, or they'll resolve to
                                        // different mount points and the consumer won't find the queue
+    bool drain;                        // consumer only: drain queue before start
 };
 
 [[nodiscard]] auto parseHugePages(std::string const& value) -> turboq::HugePagesOption {
@@ -73,7 +83,7 @@ struct Config {
     if (value == "1g") {
         return turboq::HugePagesOption::HugePages1G;
     }
-    throw std::runtime_error{"unknown --hugepages '" + value + "' (expected auto, none, 2m or 1g)"};
+    throw BenchmarkError{"unknown --hugepages \"{}\" (expected auto, none, 2m or 1g)", value};
 }
 
 /// DefaultMemorySource{HugePagesOption} throws a bare ENOENT ("No such file or directory") when it
@@ -84,17 +94,19 @@ struct Config {
     try {
         return turboq::DefaultMemorySource{cfg.hugePages};
     } catch (std::system_error const& e) {
-        throw std::runtime_error{
-            std::string{e.what()} + " -- no hugetlbfs mount found for --hugepages=" + std::string{[&] {
-                switch (cfg.hugePages) {
-                case turboq::HugePagesOption::Auto: return "auto";
-                case turboq::HugePagesOption::None: return "none";
-                case turboq::HugePagesOption::HugePages2M: return "2m";
-                case turboq::HugePagesOption::HugePages1G: return "1g";
-                }
-                return "?";
-            }()} +
-            ". Huge pages need to be reserved and mounted first; see README.md's \"Huge pages\" section."};
+        char const* optValue = [&] {
+            switch (cfg.hugePages) {
+            case turboq::HugePagesOption::Auto: return "auto";
+            case turboq::HugePagesOption::None: return "none";
+            case turboq::HugePagesOption::HugePages2M: return "2m";
+            case turboq::HugePagesOption::HugePages1G: return "1g";
+            }
+            return "?";
+        }();
+
+        throw BenchmarkError{"{} -- no hugetlbfs mount found for --hugepages={}. Huge pages need to be reserved and "
+                             "mounted first; see README.md's \"Huge pages\" section.",
+            e.what(), optValue};
     }
 }
 
@@ -105,7 +117,7 @@ struct Config {
     if (value == "consumer") {
         return Role::Consumer;
     }
-    throw std::runtime_error{"unknown --role '" + value + "' (expected producer or consumer)"};
+    throw BenchmarkError{"unknown --role \"{}\" (expected producer or consumer)", value};
 }
 
 [[nodiscard]] auto parseQueueType(std::string const& value) -> QueueType {
@@ -118,7 +130,7 @@ struct Config {
     if (value == "multicast") {
         return QueueType::Multicast;
     }
-    throw std::runtime_error{"unknown --type '" + value + "' (expected spsc, mpsc or multicast)"};
+    throw BenchmarkError{"unknown --type \"{}\" (expected spsc, mpsc or multicast)", value};
 }
 
 /// Busy/sleep hybrid wait until 'deadlineNs'. Sleeping for long waits avoids
@@ -218,7 +230,16 @@ auto runConsumer(ConsumerT& consumer, Config const& cfg) -> bool {
     bench::signalHandler().installSignalHandlers();
 
     bench::LatencyCollector collector{totalExpected >= cfg.warmup ? totalExpected - cfg.warmup : 0};
-    std::vector<bench::SequenceValidator> validators(cfg.producerCount); // one strict validator per producer-id range
+    std::vector<bench::SequenceValidator> validators{cfg.producerCount}; // one strict validator per producer-id range
+
+    // Drain queue before start processing
+    while (cfg.drain) {
+        auto result = consumer.fetch();
+        if (!result || result.empty()) {
+            break;
+        }
+        consumer.consume();
+    }
 
     auto const idleThresholdNs = static_cast<std::int64_t>(cfg.idleMs) * 1'000'000;
     auto const startTime = bench::clockNow();
@@ -382,6 +403,7 @@ int main(int argc, char* argv[]) {
             ("hugepages", "backing memory: auto, none, 2m or 1g. Must match between producer and "
                 "consumer -- they resolve to different mount points otherwise and the consumer "
                 "won't find the queue", cxxopts::value<std::string>()->default_value("none"))
+            ("drain", "drain queue before start processing")
             ("h,help", "print help and exit")
         ;
         // clang-format on
@@ -411,6 +433,7 @@ int main(int argc, char* argv[]) {
         cfg.warmup = args["warmup"].as<std::uint64_t>();
         cfg.idleMs = args["idle"].as<std::uint64_t>();
         cfg.hugePages = parseHugePages(args["hugepages"].as<std::string>());
+        cfg.drain = args.count("drain");
 
         if (cfg.messageSize < sizeof(bench::Message)) {
             std::fprintf(stderr, "ERROR: --size must be >= %zu bytes (message header size)\n", sizeof(bench::Message));
