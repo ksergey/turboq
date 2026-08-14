@@ -30,6 +30,7 @@
 #include <cxxopts.hpp>
 
 #include <turboq/MPSCQueue.h>
+#include <turboq/MemorySource.h>
 #include <turboq/MulticastQueue.h>
 #include <turboq/SPSCQueue.h>
 #include <turboq/Utils.h>
@@ -48,13 +49,54 @@ struct Config {
     std::size_t capacityBytes; // spsc / multicast
     std::size_t lengthHint;    // mpsc ring length hint, in slots
     std::size_t messageSize;
-    std::uint64_t count;    // producer: messages to send; consumer: messages to expect per producer
-    double rate;            // producer only: messages per second (0 = unlimited)
-    unsigned producerId;    // producer only: this instance's slot in the global sequence range (mpsc)
-    unsigned producerCount; // consumer only: how many distinct producer-id ranges to expect (mpsc)
-    std::uint64_t warmup;   // consumer only: messages excluded from latency stats (still validated)
-    std::uint64_t idleMs;   // consumer only
+    std::uint64_t count;               // producer: messages to send; consumer: messages to expect per producer
+    double rate;                       // producer only: messages per second (0 = unlimited)
+    unsigned producerId;               // producer only: this instance's slot in the global sequence range (mpsc)
+    unsigned producerCount;            // consumer only: how many distinct producer-id ranges to expect (mpsc)
+    std::uint64_t warmup;              // consumer only: messages excluded from latency stats (still validated)
+    std::uint64_t idleMs;              // consumer only
+    turboq::HugePagesOption hugePages; // where the queue's backing memory is allocated (see --hugepages);
+                                       // producer and consumer must agree on this, or they'll resolve to
+                                       // different mount points and the consumer won't find the queue
 };
+
+[[nodiscard]] auto parseHugePages(std::string const& value) -> turboq::HugePagesOption {
+    if (value == "auto") {
+        return turboq::HugePagesOption::Auto;
+    }
+    if (value == "none") {
+        return turboq::HugePagesOption::None;
+    }
+    if (value == "2m") {
+        return turboq::HugePagesOption::HugePages2M;
+    }
+    if (value == "1g") {
+        return turboq::HugePagesOption::HugePages1G;
+    }
+    throw std::runtime_error{"unknown --hugepages '" + value + "' (expected auto, none, 2m or 1g)"};
+}
+
+/// DefaultMemorySource{HugePagesOption} throws a bare ENOENT ("No such file or directory") when it
+/// can't find a hugetlbfs mount for the requested page size -- correct, but not obviously
+/// actionable if you don't already know that's what it's checking for. Add a pointer to what to
+/// actually go fix (see README.md's "Huge pages" section for the actual reservation/mount steps).
+[[nodiscard]] auto makeMemorySource(Config const& cfg) -> turboq::DefaultMemorySource {
+    try {
+        return turboq::DefaultMemorySource{cfg.hugePages};
+    } catch (std::system_error const& e) {
+        throw std::runtime_error{
+            std::string{e.what()} + " -- no hugetlbfs mount found for --hugepages=" + std::string{[&] {
+                switch (cfg.hugePages) {
+                case turboq::HugePagesOption::Auto: return "auto";
+                case turboq::HugePagesOption::None: return "none";
+                case turboq::HugePagesOption::HugePages2M: return "2m";
+                case turboq::HugePagesOption::HugePages1G: return "1g";
+                }
+                return "?";
+            }()} +
+            ". Huge pages need to be reserved and mounted first; see README.md's \"Huge pages\" section."};
+    }
+}
 
 [[nodiscard]] auto parseRole(std::string const& value) -> Role {
     if (value == "producer") {
@@ -263,40 +305,47 @@ auto runConsumer(ConsumerT& consumer, Config const& cfg) -> bool {
 }
 
 auto runSPSC(Config const& cfg) -> int {
+    auto memorySource = makeMemorySource(cfg);
+
     if (cfg.role == Role::Producer) {
-        auto handle =
-            turboq::SPSCQueue{cfg.queueName, turboq::SPSCQueue::CreationOptions{.capacityHint = cfg.capacityBytes}};
+        auto handle = turboq::SPSCQueue{
+            cfg.queueName, turboq::SPSCQueue::CreationOptions{.capacityHint = cfg.capacityBytes}, memorySource};
         auto producer = handle.createProducer();
         runProducer(producer, cfg);
         return EXIT_SUCCESS;
     }
-    auto handle = turboq::SPSCQueue{cfg.queueName};
+    auto handle = turboq::SPSCQueue{cfg.queueName, memorySource};
     auto consumer = handle.createConsumer();
     return runConsumer(consumer, cfg) ? EXIT_SUCCESS : EXIT_FAILURE;
 }
 
 auto runMPSC(Config const& cfg) -> int {
+    auto memorySource = makeMemorySource(cfg);
+
     if (cfg.role == Role::Producer) {
         auto handle = turboq::MPSCQueue{cfg.queueName,
-            turboq::MPSCQueue::CreationOptions{.slotSizeHint = cfg.messageSize, .lengthHint = cfg.lengthHint}};
+            turboq::MPSCQueue::CreationOptions{.slotSizeHint = cfg.messageSize, .lengthHint = cfg.lengthHint},
+            memorySource};
         auto producer = handle.createProducer();
         runProducer(producer, cfg);
         return EXIT_SUCCESS;
     }
-    auto handle = turboq::MPSCQueue{cfg.queueName};
+    auto handle = turboq::MPSCQueue{cfg.queueName, memorySource};
     auto consumer = handle.createConsumer();
     return runConsumer(consumer, cfg) ? EXIT_SUCCESS : EXIT_FAILURE;
 }
 
 auto runMulticast(Config const& cfg) -> int {
+    auto memorySource = makeMemorySource(cfg);
+
     if (cfg.role == Role::Producer) {
         auto handle = turboq::MulticastQueue{
-            cfg.queueName, turboq::MulticastQueue::CreationOptions{.capacityHint = cfg.capacityBytes}};
+            cfg.queueName, turboq::MulticastQueue::CreationOptions{.capacityHint = cfg.capacityBytes}, memorySource};
         auto producer = handle.createProducer();
         runProducer(producer, cfg);
         return EXIT_SUCCESS;
     }
-    auto handle = turboq::MulticastQueue{cfg.queueName};
+    auto handle = turboq::MulticastQueue{cfg.queueName, memorySource};
     auto consumer = handle.createConsumer();
     return runConsumer(consumer, cfg) ? EXIT_SUCCESS : EXIT_FAILURE;
 }
@@ -330,6 +379,9 @@ int main(int argc, char* argv[]) {
                 cxxopts::value<std::uint64_t>()->default_value("1000"))
             ("i,idle", "[consumer] max idle time with no data before giving up early (ms)",
                 cxxopts::value<std::uint64_t>()->default_value("5000"))
+            ("hugepages", "backing memory: auto, none, 2m or 1g. Must match between producer and "
+                "consumer -- they resolve to different mount points otherwise and the consumer "
+                "won't find the queue", cxxopts::value<std::string>()->default_value("none"))
             ("h,help", "print help and exit")
         ;
         // clang-format on
@@ -358,6 +410,7 @@ int main(int argc, char* argv[]) {
         cfg.producerCount = args["producers"].as<unsigned>();
         cfg.warmup = args["warmup"].as<std::uint64_t>();
         cfg.idleMs = args["idle"].as<std::uint64_t>();
+        cfg.hugePages = parseHugePages(args["hugepages"].as<std::string>());
 
         if (cfg.messageSize < sizeof(bench::Message)) {
             std::fprintf(stderr, "ERROR: --size must be >= %zu bytes (message header size)\n", sizeof(bench::Message));
