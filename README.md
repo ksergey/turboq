@@ -207,5 +207,5 @@ it couldn't satisfy.
 
 ### License
 
-Distributed under the AGPL-3.0 License. See LICENSE for details.
+Distributed under the MIT License. See LICENSE for details.
 

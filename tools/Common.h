@@ -1,5 +1,5 @@
 // Copyright (c) Sergey Kovalevich <inndie@gmail.com>
-// SPDX-License-Identifier: AGPL-3.0
+// SPDX-License-Identifier: MIT
 //
 // Shared between rate_producer / rate_consumer: wire format, monotonic clock
 // helper and a SIGINT/SIGTERM latch so both tools can be interrupted cleanly.
@@ -14,6 +14,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <span>
+#include <thread>
 #include <vector>
 
 #include <turboq/Platform.h>
@@ -33,6 +34,71 @@ struct Message {
     return std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now().time_since_epoch())
         .count();
 }
+
+/// Which clock the per-message send timestamp is stamped with -- see readTsc()/TscCalibration
+/// below for why the tsc option needs extra care on the reading side.
+enum class ClockSource { Wall, Tsc };
+
+#if defined(__x86_64__) || defined(__i386__)
+inline constexpr bool kTscSupported = true;
+#else
+inline constexpr bool kTscSupported = false;
+#endif
+
+/// Raw TSC tick count via the plain (non-serializing) RDTSC instruction. Cheaper than
+/// clock_gettime() (no vDSO/syscall, just a handful of cycles), which is the whole point of
+/// offering it -- but the ticks it returns are NOT nanoseconds and are only meaningful compared
+/// against another tick count from the SAME machine, converted through TscCalibration below.
+///
+/// Two caveats worth knowing before trusting numbers produced with this:
+///  - RDTSC isn't serializing: the CPU can execute it out of order relative to surrounding
+///    instructions, which adds a few cycles of jitter to any single reading. Irrelevant at the
+///    message-latency scale this tool measures (hundreds of ns and up), but don't reuse this for
+///    timing something a handful of instructions long without adding your own fencing.
+///  - This assumes an invariant TSC that's synchronized across cores/sockets (true on essentially
+///    all x86_64 hardware from the last ~15 years, and required reading if you're pinning
+///    producer/consumer to different cores/sockets via taskset per the README's tuning section --
+///    check for the constant_tsc and nonstop_tsc flags in /proc/cpuinfo if in doubt).
+[[nodiscard]] inline auto readTsc() noexcept -> std::uint64_t {
+    if constexpr (kTscSupported) {
+        return __builtin_ia32_rdtsc();
+    } else {
+        return 0;
+    }
+}
+
+/// One-time, per-process calibration of the TSC's tick rate against the (trusted) steady_clock,
+/// needed to convert a raw readTsc() delta into nanoseconds. Takes ~50ms; construct once at
+/// startup, not on the hot path.
+class TscCalibration {
+private:
+    double nsPerTick_{1.0};
+
+public:
+    TscCalibration() noexcept {
+        constexpr auto kCalibrationWindow = std::chrono::milliseconds(50);
+
+        auto const startNs = clockNow();
+        auto const startTicks = readTsc();
+        std::this_thread::sleep_for(kCalibrationWindow);
+        auto const endNs = clockNow();
+        auto const endTicks = readTsc();
+
+        auto const elapsedNs = static_cast<double>(endNs - startNs);
+        auto const elapsedTicks = static_cast<double>(endTicks - startTicks);
+        nsPerTick_ = elapsedTicks > 0.0 ? elapsedNs / elapsedTicks : 1.0;
+    }
+
+    /// Converts a *delta* between two readTsc() calls into nanoseconds. Not meaningful applied to
+    /// a single raw reading -- readTsc() has no defined epoch, only differences mean anything.
+    [[nodiscard]] auto ticksToNs(std::int64_t deltaTicks) const noexcept -> std::int64_t {
+        return static_cast<std::int64_t>(static_cast<double>(deltaTicks) * nsPerTick_);
+    }
+
+    [[nodiscard]] auto tickFrequencyGHz() const noexcept -> double {
+        return 1.0 / nsPerTick_;
+    }
+};
 
 /// Simple SIGINT/SIGTERM latch so both tools can be interrupted cleanly
 /// instead of being killed mid-write/mid-read.

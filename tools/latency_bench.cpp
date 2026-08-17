@@ -1,5 +1,5 @@
 // Copyright (c) Sergey Kovalevich <inndie@gmail.com>
-// SPDX-License-Identifier: AGPL-3.0
+// SPDX-License-Identifier: MIT
 //
 // Single binary, single role per run: pass --role producer or --role consumer,
 // and --type spsc|mpsc|multicast to pick which queue implementation to talk
@@ -25,8 +25,10 @@
 #include <cstdio>
 #include <cstring>
 #include <format>
+#include <optional>
 #include <string>
 #include <thread>
+#include <utility>
 
 #include <cxxopts.hpp>
 
@@ -68,7 +70,19 @@ struct Config {
                                        // producer and consumer must agree on this, or they'll resolve to
                                        // different mount points and the consumer won't find the queue
     bool drain;                        // consumer only: drain queue before start
+    bench::ClockSource clockSource;    // per-message timestamp source; must match between producer and
+                                       // consumer or the "latency" numbers are meaningless (see --clock)
 };
+
+[[nodiscard]] auto parseClockSource(std::string const& value) -> bench::ClockSource {
+    if (value == "wall") {
+        return bench::ClockSource::Wall;
+    }
+    if (value == "rdtsc") {
+        return bench::ClockSource::Tsc;
+    }
+    throw BenchmarkError{"unknown --clock \"{}\" (expected wall or rdtsc)", value};
+}
 
 [[nodiscard]] auto parseHugePages(std::string const& value) -> turboq::HugePagesOption {
     if (value == "auto") {
@@ -159,10 +173,11 @@ void runProducer(ProducerT& producer, Config const& cfg) {
     auto const intervalNs = cfg.rate > 0 ? static_cast<std::int64_t>(1e9 / cfg.rate) : 0;
     auto const seqBase = static_cast<std::uint64_t>(cfg.producerId) * cfg.count;
 
-    std::printf("producer: queue=%s message size=%llu bytes, count=%llu, rate=%s%s\n", cfg.queueName.c_str(),
+    std::printf("producer: queue=%s message size=%llu bytes, count=%llu, rate=%s%s, clock=%s\n", cfg.queueName.c_str(),
         static_cast<unsigned long long>(cfg.messageSize), static_cast<unsigned long long>(cfg.count),
         cfg.rate > 0 ? (std::to_string(static_cast<long long>(cfg.rate)) + "/s").c_str() : "unlimited",
-        cfg.producerId != 0 ? (" producer-id=" + std::to_string(cfg.producerId)).c_str() : "");
+        cfg.producerId != 0 ? (" producer-id=" + std::to_string(cfg.producerId)).c_str() : "",
+        cfg.clockSource == bench::ClockSource::Tsc ? "rdtsc" : "wall");
 
     bench::signalHandler().installSignalHandlers();
 
@@ -198,7 +213,8 @@ void runProducer(ProducerT& producer, Config const& cfg) {
         auto* msg = std::bit_cast<bench::Message*>(buffer.data());
         msg->seq = seqBase + sent + 1;
         // capture the timestamp as close to commit() as possible to minimize measurement noise
-        msg->sendTimeNs = bench::clockNow();
+        msg->sendTimeNs = cfg.clockSource == bench::ClockSource::Tsc ? static_cast<std::int64_t>(bench::readTsc())
+                                                                     : bench::clockNow();
 
         producer.commit();
         ++sent;
@@ -222,12 +238,21 @@ template <typename ConsumerT>
 auto runConsumer(ConsumerT& consumer, Config const& cfg) -> bool {
     auto const totalExpected = static_cast<std::uint64_t>(cfg.producerCount) * cfg.count;
 
-    std::printf("consumer: queue=%s expecting=%llu messages%s, idle timeout=%llu ms\n", cfg.queueName.c_str(),
+    std::printf("consumer: queue=%s expecting=%llu messages%s, idle timeout=%llu ms, clock=%s\n", cfg.queueName.c_str(),
         static_cast<unsigned long long>(totalExpected),
         cfg.producerCount != 1 ? (" (" + std::to_string(cfg.producerCount) + " producers)").c_str() : "",
-        static_cast<unsigned long long>(cfg.idleMs));
+        static_cast<unsigned long long>(cfg.idleMs), cfg.clockSource == bench::ClockSource::Tsc ? "rdtsc" : "wall");
 
     bench::signalHandler().installSignalHandlers();
+
+    // Only pay the ~50ms calibration cost when it's actually needed. This must happen on THIS
+    // process -- the tick rate isn't something the producer can hand over, and each process's own
+    // calibration is what its own readTsc() deltas need to be divided against.
+    std::optional<bench::TscCalibration> tscCalibration;
+    if (cfg.clockSource == bench::ClockSource::Tsc) {
+        tscCalibration.emplace();
+        std::printf("calibrated TSC frequency: %.3f GHz\n", tscCalibration->tickFrequencyGHz());
+    }
 
     bench::LatencyCollector collector{totalExpected >= cfg.warmup ? totalExpected - cfg.warmup : 0};
     std::vector<bench::SequenceValidator> validators(cfg.producerCount); // one strict validator per producer-id range
@@ -257,7 +282,7 @@ auto runConsumer(ConsumerT& consumer, Config const& cfg) -> bool {
             continue;
         }
 
-        auto const now = bench::clockNow();
+        auto const nowWall = bench::clockNow();
         auto const* msg = std::bit_cast<bench::Message const*>(buffer.data());
 
         // msg->seq is 1-based and offset by producerId * cfg.count (see runProducer); recover which
@@ -274,12 +299,19 @@ auto runConsumer(ConsumerT& consumer, Config const& cfg) -> bool {
         }
 
         if (received >= cfg.warmup) {
-            collector.record(static_cast<std::uint64_t>(now - msg->sendTimeNs));
+            // idle-timeout bookkeeping above always uses clockNow() regardless of --clock; only the
+            // per-message latency figure itself switches source, and only readTsc() here -- no
+            // clock_gettime() call -- when --clock rdtsc is selected.
+            auto const latencyNs =
+                cfg.clockSource == bench::ClockSource::Tsc
+                    ? tscCalibration->ticksToNs(static_cast<std::int64_t>(bench::readTsc()) - msg->sendTimeNs)
+                    : nowWall - msg->sendTimeNs;
+            collector.record(static_cast<std::uint64_t>(latencyNs));
         }
 
         consumer.consume();
         ++received;
-        lastActivity = now;
+        lastActivity = nowWall;
     }
 
     auto const elapsedSec = static_cast<double>(bench::clockNow() - startTime) / 1e9;
@@ -326,9 +358,14 @@ auto runSPSC(Config const& cfg) -> int {
         runProducer(producer, cfg);
         return EXIT_SUCCESS;
     }
-    auto queue = turboq::SPSCMessageQueue{cfg.queueName, memorySource};
-    auto consumer = queue.createConsumer();
-    return runConsumer(consumer, cfg) ? EXIT_SUCCESS : EXIT_FAILURE;
+
+    if (cfg.role == Role::Consumer) {
+        auto queue = turboq::SPSCMessageQueue{cfg.queueName, memorySource};
+        auto consumer = queue.createConsumer();
+        return runConsumer(consumer, cfg) ? EXIT_SUCCESS : EXIT_FAILURE;
+    }
+
+    std::unreachable();
 }
 
 auto runMPSC(Config const& cfg) -> int {
@@ -342,9 +379,14 @@ auto runMPSC(Config const& cfg) -> int {
         runProducer(producer, cfg);
         return EXIT_SUCCESS;
     }
-    auto queue = turboq::MPSCMessageQueue{cfg.queueName, memorySource};
-    auto consumer = queue.createConsumer();
-    return runConsumer(consumer, cfg) ? EXIT_SUCCESS : EXIT_FAILURE;
+
+    if (cfg.role == Role::Consumer) {
+        auto queue = turboq::MPSCMessageQueue{cfg.queueName, memorySource};
+        auto consumer = queue.createConsumer();
+        return runConsumer(consumer, cfg) ? EXIT_SUCCESS : EXIT_FAILURE;
+    }
+
+    std::unreachable();
 }
 
 auto runMulticast(Config const& cfg) -> int {
@@ -357,9 +399,14 @@ auto runMulticast(Config const& cfg) -> int {
         runProducer(producer, cfg);
         return EXIT_SUCCESS;
     }
-    auto queue = turboq::MulticastMessageQueue{cfg.queueName, memorySource};
-    auto consumer = queue.createConsumer();
-    return runConsumer(consumer, cfg) ? EXIT_SUCCESS : EXIT_FAILURE;
+
+    if (cfg.role == Role::Consumer) {
+        auto queue = turboq::MulticastMessageQueue{cfg.queueName, memorySource};
+        auto consumer = queue.createConsumer();
+        return runConsumer(consumer, cfg) ? EXIT_SUCCESS : EXIT_FAILURE;
+    }
+
+    std::unreachable();
 }
 
 } // namespace
@@ -395,6 +442,9 @@ int main(int argc, char* argv[]) {
                 "consumer -- they resolve to different mount points otherwise and the consumer "
                 "won't find the queue", cxxopts::value<std::string>()->default_value("none"))
             ("drain", "drain queue before start processing")
+            ("clock", "per-message timestamp source: wall (clock_gettime) or rdtsc (__builtin_ia32_rdtsc, cheaper "
+                "but needs a synchronized invariant TSC -- must match between producer and consumer)",
+                cxxopts::value<std::string>()->default_value("wall"))
             ("h,help", "print help and exit")
         ;
         // clang-format on
@@ -425,6 +475,7 @@ int main(int argc, char* argv[]) {
         cfg.idleMs = args["idle"].as<std::uint64_t>();
         cfg.hugePages = parseHugePages(args["hugepages"].as<std::string>());
         cfg.drain = args.count("drain");
+        cfg.clockSource = parseClockSource(args["clock"].as<std::string>());
 
         if (cfg.messageSize < sizeof(bench::Message)) {
             std::fprintf(stderr, "ERROR: --size must be >= %zu bytes (message header size)\n", sizeof(bench::Message));
@@ -452,6 +503,10 @@ int main(int argc, char* argv[]) {
         }
         if (cfg.role == Role::Consumer && cfg.warmup >= cfg.count) {
             std::fprintf(stderr, "ERROR: --warmup must be less than --count\n");
+            return EXIT_FAILURE;
+        }
+        if (cfg.clockSource == bench::ClockSource::Tsc && !bench::kTscSupported) {
+            std::fprintf(stderr, "ERROR: --clock rdtsc is not available on this platform (x86/x86_64 only)\n");
             return EXIT_FAILURE;
         }
 
