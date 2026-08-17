@@ -7,20 +7,20 @@
 
 #include <doctest/doctest.h>
 
-#include "MulticastQueue.h"
+#include "MulticastMessageQueue.h"
 #include "TestUtils.h"
 
 namespace turboq::testing {
 
-TEST_SUITE("MulticastQueue") {
+TEST_SUITE("MulticastMessageQueue") {
 
     struct alignas(64) Message {
         std::uint64_t seq;
     };
 
     TEST_CASE("basic") {
-        auto result = MulticastQueue::makeQueue(
-            "test", MulticastQueue::CreationOptions{.capacityHint = 1024 * 1024 * 1}, AnonymousMemorySource{});
+        auto result = MulticastMessageQueue::makeQueue(
+            "test", MulticastMessageQueue::CreationOptions{.capacityHint = 1024 * 1024 * 1}, AnonymousMemorySource{});
         REQUIRE(result);
 
         auto queue = std::move(result).value();
@@ -50,14 +50,14 @@ TEST_SUITE("MulticastQueue") {
     }
 
     TEST_CASE("capacity 0") {
-        auto result = MulticastQueue::makeQueue(
-            "capacity", MulticastQueue::CreationOptions{.capacityHint = 0}, AnonymousMemorySource{});
+        auto result = MulticastMessageQueue::makeQueue(
+            "capacity", MulticastMessageQueue::CreationOptions{.capacityHint = 0}, AnonymousMemorySource{});
         REQUIRE_FALSE(result);
     }
 
     TEST_CASE("a single message fans out to every independent consumer") {
-        auto result = MulticastQueue::makeQueue(
-            "fan-out", MulticastQueue::CreationOptions{.capacityHint = 1024 * 1024}, AnonymousMemorySource{});
+        auto result = MulticastMessageQueue::makeQueue(
+            "fan-out", MulticastMessageQueue::CreationOptions{.capacityHint = 1024 * 1024}, AnonymousMemorySource{});
         REQUIRE(result);
 
         auto queue = std::move(result).value();
@@ -66,7 +66,7 @@ TEST_SUITE("MulticastQueue") {
 
         // consumers only see messages published after they were created, so create them up front
         constexpr int kConsumerCount = 5;
-        std::vector<MulticastQueue::Consumer> consumers;
+        std::vector<MulticastMessageQueue::Consumer> consumers;
         consumers.reserve(kConsumerCount);
         for (int i = 0; i < kConsumerCount; ++i) {
             auto consumer = queue.createConsumer();
@@ -92,8 +92,8 @@ TEST_SUITE("MulticastQueue") {
     }
 
     TEST_CASE("a consumer created after publishing does not see the backlog") {
-        auto result = MulticastQueue::makeQueue(
-            "late-subscriber", MulticastQueue::CreationOptions{.capacityHint = 1024 * 1024}, AnonymousMemorySource{});
+        auto result = MulticastMessageQueue::makeQueue("late-subscriber",
+            MulticastMessageQueue::CreationOptions{.capacityHint = 1024 * 1024}, AnonymousMemorySource{});
         REQUIRE(result);
 
         auto queue = std::move(result).value();
@@ -118,8 +118,8 @@ TEST_SUITE("MulticastQueue") {
     TEST_CASE("a second producer is rejected while the first is alive") {
         auto source = makeTempMemorySource();
 
-        auto created =
-            MulticastQueue::makeQueue("single-producer", MulticastQueue::CreationOptions{.capacityHint = 4096}, source);
+        auto created = MulticastMessageQueue::makeQueue(
+            "single-producer", MulticastMessageQueue::CreationOptions{.capacityHint = 4096}, source);
         REQUIRE(created);
 
         // open-only, via an independent file descriptor -- required for flock() contention to be real,
@@ -128,7 +128,7 @@ TEST_SUITE("MulticastQueue") {
         auto producerA = handleA.createProducer();
         REQUIRE(producerA);
 
-        auto opened = MulticastQueue::makeQueue("single-producer", source);
+        auto opened = MulticastMessageQueue::makeQueue("single-producer", source);
         REQUIRE(opened);
         auto handleB = std::move(opened).value();
 
@@ -136,8 +136,8 @@ TEST_SUITE("MulticastQueue") {
     }
 
     TEST_CASE("reset() fast-forwards a consumer to the current head") {
-        auto result = MulticastQueue::makeQueue(
-            "reset", MulticastQueue::CreationOptions{.capacityHint = 4096}, AnonymousMemorySource{});
+        auto result = MulticastMessageQueue::makeQueue(
+            "reset", MulticastMessageQueue::CreationOptions{.capacityHint = 4096}, AnonymousMemorySource{});
         REQUIRE(result);
 
         auto queue = std::move(result).value();
@@ -159,8 +159,8 @@ TEST_SUITE("MulticastQueue") {
     }
 
     TEST_CASE("producer/consumer survive being moved") {
-        auto result = MulticastQueue::makeQueue(
-            "move-semantics", MulticastQueue::CreationOptions{.capacityHint = 4096}, AnonymousMemorySource{});
+        auto result = MulticastMessageQueue::makeQueue(
+            "move-semantics", MulticastMessageQueue::CreationOptions{.capacityHint = 4096}, AnonymousMemorySource{});
         REQUIRE(result);
 
         auto queue = std::move(result).value();
@@ -179,8 +179,8 @@ TEST_SUITE("MulticastQueue") {
         REQUIRE(dequeue(consumerB, msg));
         REQUIRE_EQ(msg.seq, 7);
 
-        MulticastQueue::Producer producerC;
-        MulticastQueue::Consumer consumerC;
+        MulticastMessageQueue::Producer producerC;
+        MulticastMessageQueue::Consumer consumerC;
         producerC = std::move(producerB);
         consumerC = std::move(consumerB);
 
@@ -192,8 +192,8 @@ TEST_SUITE("MulticastQueue") {
     TEST_CASE("consumer detects being lapped by a fast producer (overrun)") {
         // small capacity relative to the message size so the producer wraps around many times
         // over a paused consumer's position
-        auto result = MulticastQueue::makeQueue(
-            "overrun", MulticastQueue::CreationOptions{.capacityHint = 4096}, AnonymousMemorySource{});
+        auto result = MulticastMessageQueue::makeQueue(
+            "overrun", MulticastMessageQueue::CreationOptions{.capacityHint = 4096}, AnonymousMemorySource{});
         REQUIRE(result);
 
         auto queue = std::move(result).value();
@@ -230,8 +230,8 @@ TEST_SUITE("MulticastQueue") {
     }
 
     TEST_CASE("a fully-consumed stream across many wraps never reports a false overrun") {
-        auto result = MulticastQueue::makeQueue(
-            "no-false-overrun", MulticastQueue::CreationOptions{.capacityHint = 4096}, AnonymousMemorySource{});
+        auto result = MulticastMessageQueue::makeQueue(
+            "no-false-overrun", MulticastMessageQueue::CreationOptions{.capacityHint = 4096}, AnonymousMemorySource{});
         REQUIRE(result);
 
         auto queue = std::move(result).value();
@@ -253,8 +253,8 @@ TEST_SUITE("MulticastQueue") {
     }
 
     TEST_CASE("reset() after an overrun does not resurrect the stale sequence baseline") {
-        auto result = MulticastQueue::makeQueue(
-            "overrun-then-reset", MulticastQueue::CreationOptions{.capacityHint = 4096}, AnonymousMemorySource{});
+        auto result = MulticastMessageQueue::makeQueue("overrun-then-reset",
+            MulticastMessageQueue::CreationOptions{.capacityHint = 4096}, AnonymousMemorySource{});
         REQUIRE(result);
 
         auto queue = std::move(result).value();

@@ -30,10 +30,10 @@
 
 #include <cxxopts.hpp>
 
-#include <turboq/MPSCQueue.h>
+#include <turboq/MPSCMessageQueue.h>
 #include <turboq/MemorySource.h>
-#include <turboq/MulticastQueue.h>
-#include <turboq/SPSCQueue.h>
+#include <turboq/MulticastMessageQueue.h>
+#include <turboq/SPSCMessageQueue.h>
 #include <turboq/Utils.h>
 
 #include "Common.h"
@@ -320,13 +320,13 @@ auto runSPSC(Config const& cfg) -> int {
     auto memorySource = makeMemorySource(cfg);
 
     if (cfg.role == Role::Producer) {
-        auto handle = turboq::SPSCQueue{
-            cfg.queueName, turboq::SPSCQueue::CreationOptions{.capacityHint = cfg.capacityBytes}, memorySource};
+        auto handle = turboq::SPSCMessageQueue{
+            cfg.queueName, turboq::SPSCMessageQueue::CreationOptions{.capacityHint = cfg.capacityBytes}, memorySource};
         auto producer = handle.createProducer();
         runProducer(producer, cfg);
         return EXIT_SUCCESS;
     }
-    auto handle = turboq::SPSCQueue{cfg.queueName, memorySource};
+    auto handle = turboq::SPSCMessageQueue{cfg.queueName, memorySource};
     auto consumer = handle.createConsumer();
     return runConsumer(consumer, cfg) ? EXIT_SUCCESS : EXIT_FAILURE;
 }
@@ -335,14 +335,14 @@ auto runMPSC(Config const& cfg) -> int {
     auto memorySource = makeMemorySource(cfg);
 
     if (cfg.role == Role::Producer) {
-        auto handle = turboq::MPSCQueue{cfg.queueName,
-            turboq::MPSCQueue::CreationOptions{.slotSizeHint = cfg.messageSize, .lengthHint = cfg.lengthHint},
+        auto handle = turboq::MPSCMessageQueue{cfg.queueName,
+            turboq::MPSCMessageQueue::CreationOptions{.slotSizeHint = cfg.messageSize, .lengthHint = cfg.lengthHint},
             memorySource};
         auto producer = handle.createProducer();
         runProducer(producer, cfg);
         return EXIT_SUCCESS;
     }
-    auto handle = turboq::MPSCQueue{cfg.queueName, memorySource};
+    auto handle = turboq::MPSCMessageQueue{cfg.queueName, memorySource};
     auto consumer = handle.createConsumer();
     return runConsumer(consumer, cfg) ? EXIT_SUCCESS : EXIT_FAILURE;
 }
@@ -351,13 +351,13 @@ auto runMulticast(Config const& cfg) -> int {
     auto memorySource = makeMemorySource(cfg);
 
     if (cfg.role == Role::Producer) {
-        auto handle = turboq::MulticastQueue{
-            cfg.queueName, turboq::MulticastQueue::CreationOptions{.capacityHint = cfg.capacityBytes}, memorySource};
+        auto handle = turboq::MulticastMessageQueue{cfg.queueName,
+            turboq::MulticastMessageQueue::CreationOptions{.capacityHint = cfg.capacityBytes}, memorySource};
         auto producer = handle.createProducer();
         runProducer(producer, cfg);
         return EXIT_SUCCESS;
     }
-    auto handle = turboq::MulticastQueue{cfg.queueName, memorySource};
+    auto handle = turboq::MulticastMessageQueue{cfg.queueName, memorySource};
     auto consumer = handle.createConsumer();
     return runConsumer(consumer, cfg) ? EXIT_SUCCESS : EXIT_FAILURE;
 }

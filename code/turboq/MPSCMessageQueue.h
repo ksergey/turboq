@@ -22,7 +22,7 @@ namespace turboq {
 namespace detail {
 
 template <typename Options>
-struct MPSCQueueLayout {
+struct MPSCMessageQueueLayout {
     static constexpr std::string_view kTag = Options::tag;
 
     struct MemoryHeader {
@@ -65,9 +65,9 @@ struct MPSCQueueLayout {
 
 /// MPSC queue producer
 template <typename Options>
-class MPSCQueueProducerImpl {
+class MPSCMessageQueueProducerImpl {
 private:
-    using Details = MPSCQueueLayout<Options>;
+    using Details = MPSCMessageQueueLayout<Options>;
     using MemoryHeader = typename Details::MemoryHeader;
     using MessageHeader = typename Details::MessageHeader;
     using StateHeader = typename Details::StateHeader;
@@ -80,24 +80,24 @@ private:
     std::size_t consumerPosCache_{0};
 
 public:
-    MPSCQueueProducerImpl() = default;
-    ~MPSCQueueProducerImpl() = default;
+    MPSCMessageQueueProducerImpl() = default;
+    ~MPSCMessageQueueProducerImpl() = default;
 
-    MPSCQueueProducerImpl(MPSCQueueProducerImpl&& other) noexcept
+    MPSCMessageQueueProducerImpl(MPSCMessageQueueProducerImpl&& other) noexcept
         : storage_{std::move(other.storage_)}, data_{std::move(other.data_)},
           header_{std::exchange(other.header_, nullptr)}, commitStates_{std::move(other.commitStates_)},
           producerPosCache_{std::exchange(other.producerPosCache_, 0)},
           consumerPosCache_{std::exchange(other.consumerPosCache_, 0)} {}
 
-    MPSCQueueProducerImpl& operator=(MPSCQueueProducerImpl&& other) noexcept {
+    MPSCMessageQueueProducerImpl& operator=(MPSCMessageQueueProducerImpl&& other) noexcept {
         if (this != &other) {
-            this->~MPSCQueueProducerImpl();
-            new (this) MPSCQueueProducerImpl{std::move(other)};
+            this->~MPSCMessageQueueProducerImpl();
+            new (this) MPSCMessageQueueProducerImpl{std::move(other)};
         }
         return *this;
     }
 
-    MPSCQueueProducerImpl(MappedRegion&& storage) noexcept : storage_{std::move(storage)} {
+    MPSCMessageQueueProducerImpl(MappedRegion&& storage) noexcept : storage_{std::move(storage)} {
         assert(storage_);
 
         if (auto const rc = storage_.advise(Advice::Sequential); !rc) {
@@ -183,9 +183,9 @@ public:
 
 /// MPSC queue consumer
 template <typename Options>
-class MPSCQueueConsumerImpl {
+class MPSCMessageQueueConsumerImpl {
 private:
-    using Details = MPSCQueueLayout<Options>;
+    using Details = MPSCMessageQueueLayout<Options>;
     using MemoryHeader = typename Details::MemoryHeader;
     using MessageHeader = typename Details::MessageHeader;
     using StateHeader = typename Details::StateHeader;
@@ -200,10 +200,10 @@ private:
     StateHeader* lastCommitState_{nullptr};
 
 public:
-    MPSCQueueConsumerImpl() = default;
-    ~MPSCQueueConsumerImpl() = default;
+    MPSCMessageQueueConsumerImpl() = default;
+    ~MPSCMessageQueueConsumerImpl() = default;
 
-    MPSCQueueConsumerImpl(MPSCQueueConsumerImpl&& other) noexcept
+    MPSCMessageQueueConsumerImpl(MPSCMessageQueueConsumerImpl&& other) noexcept
         : storage_{std::move(other.storage_)}, data_{std::move(other.data_)},
           header_{std::exchange(other.header_, nullptr)}, commitStates_{std::move(other.commitStates_)},
           producerPosCache_{std::exchange(other.producerPosCache_, 0)},
@@ -211,15 +211,15 @@ public:
           lastMessageHeader_{std::exchange(other.lastMessageHeader_, nullptr)},
           lastCommitState_{std::exchange(other.lastCommitState_, nullptr)} {}
 
-    MPSCQueueConsumerImpl& operator=(MPSCQueueConsumerImpl&& other) noexcept {
+    MPSCMessageQueueConsumerImpl& operator=(MPSCMessageQueueConsumerImpl&& other) noexcept {
         if (this != &other) {
-            this->~MPSCQueueConsumerImpl();
-            new (this) MPSCQueueConsumerImpl{std::move(other)};
+            this->~MPSCMessageQueueConsumerImpl();
+            new (this) MPSCMessageQueueConsumerImpl{std::move(other)};
         }
         return *this;
     }
 
-    MPSCQueueConsumerImpl(MappedRegion&& storage) noexcept : storage_{std::move(storage)} {
+    MPSCMessageQueueConsumerImpl(MappedRegion&& storage) noexcept : storage_{std::move(storage)} {
         assert(storage_);
 
         if (auto const rc = storage_.advise(Advice::Sequential); !rc) {
@@ -330,42 +330,42 @@ public:
 /// different slots concurrently: each one only ever owns the exact slot it CAS'd for.
 
 template <typename Options>
-class MPSCQueueImpl {
+class MPSCMessageQueueImpl {
 private:
-    using Details = MPSCQueueLayout<Options>;
+    using Details = MPSCMessageQueueLayout<Options>;
     using MemoryHeader = typename Details::MemoryHeader;
     using MessageHeader = typename Details::MessageHeader;
     using StateHeader = typename Details::StateHeader;
 
     File file_;
 
-    MPSCQueueImpl(File file) noexcept : file_{std::move(file)} {}
+    MPSCMessageQueueImpl(File file) noexcept : file_{std::move(file)} {}
 
 public:
-    using Producer = MPSCQueueProducerImpl<Options>;
-    using Consumer = MPSCQueueConsumerImpl<Options>;
+    using Producer = MPSCMessageQueueProducerImpl<Options>;
+    using Consumer = MPSCMessageQueueConsumerImpl<Options>;
 
     struct CreationOptions {
         std::size_t slotSizeHint;
         std::size_t lengthHint;
     };
 
-    MPSCQueueImpl(MPSCQueueImpl const&) = delete;
-    MPSCQueueImpl& operator=(MPSCQueueImpl const&) = delete;
-    MPSCQueueImpl() = default;
+    MPSCMessageQueueImpl(MPSCMessageQueueImpl const&) = delete;
+    MPSCMessageQueueImpl& operator=(MPSCMessageQueueImpl const&) = delete;
+    MPSCMessageQueueImpl() = default;
 
-    MPSCQueueImpl(MPSCQueueImpl&& other) noexcept : file_{std::move(other.file_)} {}
+    MPSCMessageQueueImpl(MPSCMessageQueueImpl&& other) noexcept : file_{std::move(other.file_)} {}
 
-    MPSCQueueImpl& operator=(MPSCQueueImpl&& other) noexcept {
+    MPSCMessageQueueImpl& operator=(MPSCMessageQueueImpl&& other) noexcept {
         if (this != &other) {
-            this->~MPSCQueueImpl();
-            new (this) MPSCQueueImpl{std::move(other)};
+            this->~MPSCMessageQueueImpl();
+            new (this) MPSCMessageQueueImpl{std::move(other)};
         }
         return *this;
     }
 
     /// Construct mpsc queue (open or create), throws std::runtime_error on error
-    MPSCQueueImpl(std::string_view name, CreationOptions const& options,
+    MPSCMessageQueueImpl(std::string_view name, CreationOptions const& options,
         MemorySource const& memorySource = DefaultMemorySource{}) {
         if (options.slotSizeHint == 0) {
             throw std::system_error{
@@ -419,7 +419,7 @@ public:
         if (fileSize == 0) {
             // init queue internals
             auto header = std::bit_cast<MemoryHeader*>(buffer.data());
-            std::ranges::copy(MPSCQueueLayout<Options>::kTag, header->tag);
+            std::ranges::copy(MPSCMessageQueueLayout<Options>::kTag, header->tag);
             header->slotSize = slotSize;
             header->length = length;
             std::atomic_ref(header->producerPos).store(0, std::memory_order_relaxed);
@@ -427,7 +427,7 @@ public:
         }
 
         auto header = std::bit_cast<MemoryHeader const*>(buffer.data());
-        if (!std::ranges::equal(MPSCQueueLayout<Options>::kTag, header->tag)) {
+        if (!std::ranges::equal(MPSCMessageQueueLayout<Options>::kTag, header->tag)) {
             throw std::system_error{makeErrorCode(Error::TagMismatch), "unexpected queue tag value"};
         }
 
@@ -435,7 +435,7 @@ public:
     }
 
     /// Construct multicast queue (open only), throws std::runtime_error on error
-    MPSCQueueImpl(std::string_view name, MemorySource const& memorySource = DefaultMemorySource{}) {
+    MPSCMessageQueueImpl(std::string_view name, MemorySource const& memorySource = DefaultMemorySource{}) {
         auto openMemorySourceResult = memorySource.open(name, MemorySource::OpenOnly);
         if (!openMemorySourceResult) {
             throw std::system_error{openMemorySourceResult.error(), "failed to open memory source"};
@@ -460,7 +460,7 @@ public:
         auto buffer = memory.content();
 
         auto header = std::bit_cast<MemoryHeader const*>(buffer.data());
-        if (!std::ranges::equal(MPSCQueueLayout<Options>::kTag, header->tag)) {
+        if (!std::ranges::equal(MPSCMessageQueueLayout<Options>::kTag, header->tag)) {
             throw std::system_error{makeErrorCode(Error::TagMismatch), "unexpected queue tag value"};
         }
 
@@ -469,9 +469,9 @@ public:
 
     template <typename... Args>
     [[nodiscard]] static auto makeQueue(Args&&... args) noexcept
-        -> std::expected<MPSCQueueImpl<Options>, std::error_code> {
+        -> std::expected<MPSCMessageQueueImpl<Options>, std::error_code> {
         try {
-            return {MPSCQueueImpl{std::forward<Args>(args)...}};
+            return {MPSCMessageQueueImpl{std::forward<Args>(args)...}};
         } catch (std::system_error const& e) {
             return std::unexpected(e.code());
         }
@@ -480,7 +480,7 @@ public:
     template <typename... Args>
     [[nodiscard]] static auto makeProducer(Args&&... args) noexcept -> std::expected<Producer, std::error_code> {
         try {
-            return {MPSCQueueImpl{std::forward<Args>(args)...}.createProducer()};
+            return {MPSCMessageQueueImpl{std::forward<Args>(args)...}.createProducer()};
         } catch (std::system_error const& e) {
             return std::unexpected(e.code());
         }
@@ -489,7 +489,7 @@ public:
     template <typename... Args>
     [[nodiscard]] static auto makeConsumer(Args&&... args) noexcept -> std::expected<Consumer, std::error_code> {
         try {
-            return {MPSCQueueImpl{std::forward<Args>(args)...}.createConsumer()};
+            return {MPSCMessageQueueImpl{std::forward<Args>(args)...}.createConsumer()};
         } catch (std::system_error const& e) {
             return std::unexpected(e.code());
         }
@@ -518,9 +518,9 @@ public:
 
 } // namespace detail
 
-struct MPSCQueueOptionsDefault {
+struct MPSCMessageQueueOptionsDefault {
     static constexpr std::string_view tag{"turboq/mpsc"};
 };
-using MPSCQueue = detail::MPSCQueueImpl<MPSCQueueOptionsDefault>;
+using MPSCMessageQueue = detail::MPSCMessageQueueImpl<MPSCMessageQueueOptionsDefault>;
 
 } // namespace turboq

@@ -11,7 +11,7 @@
 
 #include <doctest/doctest.h>
 
-#include "MPSCQueue.h"
+#include "MPSCMessageQueue.h"
 #include "TestUtils.h"
 
 namespace turboq::testing {
@@ -23,8 +23,8 @@ TEST_SUITE("MPSC") {
     };
 
     TEST_CASE("basic") {
-        auto result = MPSCQueue::makeQueue("test",
-            MPSCQueue::CreationOptions{.slotSizeHint = 2 * sizeof(Message), .lengthHint = 100},
+        auto result = MPSCMessageQueue::makeQueue("test",
+            MPSCMessageQueue::CreationOptions{.slotSizeHint = 2 * sizeof(Message), .lengthHint = 100},
             AnonymousMemorySource{});
         REQUIRE(result);
 
@@ -56,8 +56,9 @@ TEST_SUITE("MPSC") {
     }
 
     TEST_CASE("full") {
-        auto result = MPSCQueue::makeQueue("test",
-            MPSCQueue::CreationOptions{.slotSizeHint = sizeof(Message), .lengthHint = 32}, AnonymousMemorySource{});
+        auto result = MPSCMessageQueue::makeQueue("test",
+            MPSCMessageQueue::CreationOptions{.slotSizeHint = sizeof(Message), .lengthHint = 32},
+            AnonymousMemorySource{});
         REQUIRE(result);
 
         auto queue = std::move(result).value();
@@ -89,8 +90,8 @@ TEST_SUITE("MPSC") {
     }
 
     TEST_CASE("prepare() throws when message exceeds slot size") {
-        auto result = MPSCQueue::makeQueue(
-            "slot-overflow", MPSCQueue::CreationOptions{.slotSizeHint = 16, .lengthHint = 8}, AnonymousMemorySource{});
+        auto result = MPSCMessageQueue::makeQueue("slot-overflow",
+            MPSCMessageQueue::CreationOptions{.slotSizeHint = 16, .lengthHint = 8}, AnonymousMemorySource{});
         REQUIRE(result);
 
         auto queue = std::move(result).value();
@@ -103,8 +104,8 @@ TEST_SUITE("MPSC") {
     TEST_CASE("a second consumer is rejected while the first is alive") {
         auto source = makeTempMemorySource();
 
-        auto created = MPSCQueue::makeQueue(
-            "single-consumer", MPSCQueue::CreationOptions{.slotSizeHint = 64, .lengthHint = 16}, source);
+        auto created = MPSCMessageQueue::makeQueue(
+            "single-consumer", MPSCMessageQueue::CreationOptions{.slotSizeHint = 64, .lengthHint = 16}, source);
         REQUIRE(created);
 
         // open-only, via an independent file descriptor -- required for flock() contention to be real,
@@ -113,7 +114,7 @@ TEST_SUITE("MPSC") {
         auto consumerA = handleA.createConsumer();
         REQUIRE(consumerA);
 
-        auto opened = MPSCQueue::makeQueue("single-consumer", source);
+        auto opened = MPSCMessageQueue::makeQueue("single-consumer", source);
         REQUIRE(opened);
         auto handleB = std::move(opened).value();
 
@@ -121,8 +122,9 @@ TEST_SUITE("MPSC") {
     }
 
     TEST_CASE("producer/consumer survive being moved") {
-        auto result = MPSCQueue::makeQueue("move-semantics",
-            MPSCQueue::CreationOptions{.slotSizeHint = sizeof(Message), .lengthHint = 16}, AnonymousMemorySource{});
+        auto result = MPSCMessageQueue::makeQueue("move-semantics",
+            MPSCMessageQueue::CreationOptions{.slotSizeHint = sizeof(Message), .lengthHint = 16},
+            AnonymousMemorySource{});
         REQUIRE(result);
 
         auto queue = std::move(result).value();
@@ -141,8 +143,8 @@ TEST_SUITE("MPSC") {
         REQUIRE(dequeue(consumerB, msg));
         REQUIRE_EQ(msg.seq, 7);
 
-        MPSCQueue::Producer producerC;
-        MPSCQueue::Consumer consumerC;
+        MPSCMessageQueue::Producer producerC;
+        MPSCMessageQueue::Consumer consumerC;
         producerC = std::move(producerB);
         consumerC = std::move(consumerB);
 
@@ -151,13 +153,14 @@ TEST_SUITE("MPSC") {
         REQUIRE_EQ(msg.seq, 8);
     }
 
-    // Regression test: an earlier version of MPSCQueueConsumer's move constructor initialized
+    // Regression test: an earlier version of MPSCMessageQueueConsumer's move constructor initialized
     // lastCommitState_ from other.lastMessageHeader_ instead of other.lastCommitState_ (a
     // copy-paste slip), which either fails to compile (pointer types differ) or, had the types
     // matched, would have made consume() clear the wrong slot's commit flag after a move.
     TEST_CASE("consumer keeps in-flight fetch()/consume() state across a move") {
-        auto result = MPSCQueue::makeQueue("move-inflight-fetch",
-            MPSCQueue::CreationOptions{.slotSizeHint = sizeof(Message), .lengthHint = 16}, AnonymousMemorySource{});
+        auto result = MPSCMessageQueue::makeQueue("move-inflight-fetch",
+            MPSCMessageQueue::CreationOptions{.slotSizeHint = sizeof(Message), .lengthHint = 16},
+            AnonymousMemorySource{});
         REQUIRE(result);
 
         auto queue = std::move(result).value();
@@ -195,8 +198,9 @@ TEST_SUITE("MPSC") {
             REQUIRE_NE(slotSizeHint % kCacheLineSize, 0u); // sanity-check the test data itself
 
             auto const queueName = "odd-slot-" + std::to_string(slotSizeHint);
-            auto result = MPSCQueue::makeQueue(queueName,
-                MPSCQueue::CreationOptions{.slotSizeHint = slotSizeHint, .lengthHint = 16}, AnonymousMemorySource{});
+            auto result = MPSCMessageQueue::makeQueue(queueName,
+                MPSCMessageQueue::CreationOptions{.slotSizeHint = slotSizeHint, .lengthHint = 16},
+                AnonymousMemorySource{});
             REQUIRE(result);
 
             auto queue = std::move(result).value();
@@ -237,8 +241,8 @@ TEST_SUITE("MPSC") {
         // slotSizeHint is deliberately not a multiple of the cache line size, exercising the same
         // slot-alignment path as the "slots stay cache-line aligned..." test above, but now under
         // real concurrent producer/consumer contention.
-        auto result = MPSCQueue::makeQueue("mpsc-race",
-            MPSCQueue::CreationOptions{.slotSizeHint = sizeof(std::uint64_t), .lengthHint = 1024},
+        auto result = MPSCMessageQueue::makeQueue("mpsc-race",
+            MPSCMessageQueue::CreationOptions{.slotSizeHint = sizeof(std::uint64_t), .lengthHint = 1024},
             AnonymousMemorySource{});
         REQUIRE(result);
 
@@ -246,7 +250,7 @@ TEST_SUITE("MPSC") {
         auto consumer = queue.createConsumer();
         REQUIRE(consumer);
 
-        std::vector<MPSCQueue::Producer> producers;
+        std::vector<MPSCMessageQueue::Producer> producers;
         producers.reserve(kProducers);
         for (unsigned p = 0; p < kProducers; ++p) {
             auto producer = queue.createProducer();

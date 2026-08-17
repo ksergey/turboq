@@ -6,7 +6,7 @@
 
 #include <doctest/doctest.h>
 
-#include "SPSCQueue.h"
+#include "SPSCMessageQueue.h"
 #include "TestUtils.h"
 
 namespace turboq::testing {
@@ -22,11 +22,11 @@ TEST_SUITE("SPSC") {
     struct AltSPSCOptions {
         static constexpr std::string_view tag{"turboq/spsc-alt"};
     };
-    using AltSPSCQueue = detail::SPSCQueueImpl<AltSPSCOptions>;
+    using AltSPSCMessageQueue = detail::SPSCMessageQueueImpl<AltSPSCOptions>;
 
     TEST_CASE("basic") {
-        auto result = SPSCQueue::makeQueue(
-            "test", SPSCQueue::CreationOptions{.capacityHint = 1024 * 1024 * 1}, AnonymousMemorySource{});
+        auto result = SPSCMessageQueue::makeQueue(
+            "test", SPSCMessageQueue::CreationOptions{.capacityHint = 1024 * 1024 * 1}, AnonymousMemorySource{});
         REQUIRE(result);
 
         auto queue = std::move(result).value();
@@ -56,8 +56,8 @@ TEST_SUITE("SPSC") {
     }
 
     TEST_CASE("full") {
-        auto result =
-            SPSCQueue::makeQueue("test", SPSCQueue::CreationOptions{.capacityHint = 2048}, AnonymousMemorySource{});
+        auto result = SPSCMessageQueue::makeQueue(
+            "test", SPSCMessageQueue::CreationOptions{.capacityHint = 2048}, AnonymousMemorySource{});
         REQUIRE(result);
 
         auto queue = std::move(result).value();
@@ -88,44 +88,47 @@ TEST_SUITE("SPSC") {
     }
 
     TEST_CASE("capacity 0") {
-        auto result =
-            SPSCQueue::makeQueue("capacity", SPSCQueue::CreationOptions{.capacityHint = 0}, AnonymousMemorySource{});
+        auto result = SPSCMessageQueue::makeQueue(
+            "capacity", SPSCMessageQueue::CreationOptions{.capacityHint = 0}, AnonymousMemorySource{});
         REQUIRE_FALSE(result);
     }
 
     TEST_CASE("open-only on a queue that does not exist fails") {
-        auto result = SPSCQueue::makeQueue("does-not-exist", AnonymousMemorySource{});
+        auto result = SPSCMessageQueue::makeQueue("does-not-exist", AnonymousMemorySource{});
         REQUIRE_FALSE(result);
     }
 
     TEST_CASE("re-opening with a mismatched capacity fails") {
         auto source = makeTempMemorySource();
 
-        auto created = SPSCQueue::makeQueue("size-mismatch", SPSCQueue::CreationOptions{.capacityHint = 4096}, source);
+        auto created = SPSCMessageQueue::makeQueue(
+            "size-mismatch", SPSCMessageQueue::CreationOptions{.capacityHint = 4096}, source);
         REQUIRE(created);
 
-        auto reopened = SPSCQueue::makeQueue("size-mismatch", SPSCQueue::CreationOptions{.capacityHint = 8192}, source);
+        auto reopened = SPSCMessageQueue::makeQueue(
+            "size-mismatch", SPSCMessageQueue::CreationOptions{.capacityHint = 8192}, source);
         REQUIRE_FALSE(reopened);
     }
 
     TEST_CASE("opening a queue created with a different tag fails") {
         auto source = makeTempMemorySource();
 
-        auto created = SPSCQueue::makeQueue("tag-mismatch", SPSCQueue::CreationOptions{.capacityHint = 4096}, source);
+        auto created = SPSCMessageQueue::makeQueue(
+            "tag-mismatch", SPSCMessageQueue::CreationOptions{.capacityHint = 4096}, source);
         REQUIRE(created);
 
-        auto reopened = AltSPSCQueue::makeQueue("tag-mismatch", source);
+        auto reopened = AltSPSCMessageQueue::makeQueue("tag-mismatch", source);
         REQUIRE_FALSE(reopened);
     }
 
     TEST_CASE("makeProducer / makeConsumer create working endpoints directly") {
         auto source = makeTempMemorySource();
 
-        auto producer =
-            SPSCQueue::makeProducer("make-endpoints", SPSCQueue::CreationOptions{.capacityHint = 4096}, source);
+        auto producer = SPSCMessageQueue::makeProducer(
+            "make-endpoints", SPSCMessageQueue::CreationOptions{.capacityHint = 4096}, source);
         REQUIRE(producer);
 
-        auto consumer = SPSCQueue::makeConsumer("make-endpoints", source);
+        auto consumer = SPSCMessageQueue::makeConsumer("make-endpoints", source);
         REQUIRE(consumer);
 
         REQUIRE(enqueue(producer.value(), Message{.seq = 42}));
@@ -136,8 +139,8 @@ TEST_SUITE("SPSC") {
     }
 
     TEST_CASE("reset() drops any unconsumed backlog") {
-        auto result =
-            SPSCQueue::makeQueue("reset", SPSCQueue::CreationOptions{.capacityHint = 4096}, AnonymousMemorySource{});
+        auto result = SPSCMessageQueue::makeQueue(
+            "reset", SPSCMessageQueue::CreationOptions{.capacityHint = 4096}, AnonymousMemorySource{});
         REQUIRE(result);
 
         auto queue = std::move(result).value();
@@ -160,8 +163,8 @@ TEST_SUITE("SPSC") {
     }
 
     TEST_CASE("producer/consumer survive being moved") {
-        auto result = SPSCQueue::makeQueue(
-            "move-semantics", SPSCQueue::CreationOptions{.capacityHint = 4096}, AnonymousMemorySource{});
+        auto result = SPSCMessageQueue::makeQueue(
+            "move-semantics", SPSCMessageQueue::CreationOptions{.capacityHint = 4096}, AnonymousMemorySource{});
         REQUIRE(result);
 
         auto queue = std::move(result).value();
@@ -185,8 +188,8 @@ TEST_SUITE("SPSC") {
         REQUIRE_EQ(msg.seq, 7);
 
         // move-assign into an already-initialized endpoint
-        SPSCQueue::Producer producerC;
-        SPSCQueue::Consumer consumerC;
+        SPSCMessageQueue::Producer producerC;
+        SPSCMessageQueue::Consumer consumerC;
         producerC = std::move(producerB);
         consumerC = std::move(consumerB);
         REQUIRE(producerC);
