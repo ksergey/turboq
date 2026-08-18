@@ -40,22 +40,6 @@ struct SPSCMessageQueueLayout {
     static_assert(std::atomic_ref<std::size_t>::is_always_lock_free);
     static_assert(std::is_trivially_copyable_v<MemoryHeader>);
     static_assert(std::is_trivially_copyable_v<MessageHeader>);
-
-    static constexpr auto getMemoryHeaderBufferSize() noexcept -> std::size_t {
-        return detail::align_up(sizeof(MemoryHeader), kCacheLineSize);
-    }
-
-    static constexpr auto getMessageHeaderBufferSize() noexcept -> std::size_t {
-        return detail::align_up(sizeof(MessageHeader), kCacheLineSize);
-    }
-
-    static constexpr auto adjustMessagePayloadBufferSize(std::size_t payloadSize) noexcept -> std::size_t {
-        return detail::align_up(payloadSize, kCacheLineSize);
-    }
-
-    static constexpr auto adjustMessageBufferSize(std::size_t payloadSize) noexcept -> std::size_t {
-        return getMessageHeaderBufferSize() + adjustMessagePayloadBufferSize(payloadSize);
-    }
 };
 
 /// SPSC queue producer
@@ -100,7 +84,7 @@ public:
 
         auto content = storage_.content();
         header_ = std::bit_cast<MemoryHeader*>(storage_.data());
-        data_ = content.subspan(Details::getMemoryHeaderBufferSize());
+        data_ = content.subspan(detail::align_up(sizeof(MemoryHeader), kCacheLineSize));
         producerPosCache_ = std::atomic_ref(header_->producerPos).load(std::memory_order_acquire);
 
         auto const consumerPos = std::atomic_ref(header_->consumerPos).load(std::memory_order_acquire);
@@ -109,7 +93,7 @@ public:
             minFreeSpace_ = consumerPos - producerPosCache_ - 1;
         } else {
             // Reserve space at end for last MessageHeader
-            minFreeSpace_ = data_.size() - producerPosCache_ - Details::getMessageHeaderBufferSize();
+            minFreeSpace_ = data_.size() - producerPosCache_ - detail::align_up(sizeof(MessageHeader), kCacheLineSize);
         }
     }
 
@@ -125,14 +109,11 @@ public:
 
     /// Reserve contiguous space for writing without making it visible to the consumers
     [[nodiscard]] TURBOQ_FORCE_INLINE auto prepare(std::size_t size) noexcept -> std::span<std::byte> {
-        // Aligned buffer size for encoding MessageHeader
-        constexpr auto headerBufferSize = Details::getMessageHeaderBufferSize();
-        // Aligned buffer size for encoding payload (size)
-        auto const payloadBufferSize = Details::adjustMessagePayloadBufferSize(size);
-        // Aligned buffer size for encoding whole message
-        auto const messageBufferSize = Details::adjustMessageBufferSize(size);
+        constexpr auto headerBufferSize = detail::align_up(sizeof(MessageHeader), kCacheLineSize);
+        auto const payloadBufferSize = detail::align_up(size, kCacheLineSize);
+        auto const messageBufferSize = headerBufferSize + payloadBufferSize;
 
-        assert(messageBufferSize >= headerBufferSize + payloadBufferSize);
+        assert((messageBufferSize & (kCacheLineSize - 1)) == 0);
 
         if (messageBufferSize <= minFreeSpace_) [[likely]] {
             lastMessageHeader_ = std::bit_cast<MessageHeader*>(data_.data() + producerPosCache_);
@@ -251,7 +232,7 @@ public:
 
         auto content = storage_.content();
         header_ = std::bit_cast<MemoryHeader*>(content.data());
-        data_ = content.subspan(Details::getMemoryHeaderBufferSize());
+        data_ = content.subspan(detail::align_up(sizeof(MemoryHeader), kCacheLineSize));
         consumerPosCache_ = std::atomic_ref(header_->consumerPos).load(std::memory_order_relaxed);
         producerPosCache_ = std::atomic_ref(header_->producerPos).load(std::memory_order_acquire);
 
@@ -433,7 +414,7 @@ public:
         if (!getFileSizeResult) {
             throw std::system_error{getFileSizeResult.error(), "failed to get queue file size"};
         }
-        if (getFileSizeResult.value() < Details::getMemoryHeaderBufferSize()) {
+        if (getFileSizeResult.value() < detail::align_up(sizeof(MemoryHeader), kCacheLineSize)) {
             // Too small to hold even the memory header: either the queue was never created, or (for
             // memory sources like AnonymousMemorySource, where "open only" cannot truly look up an
             // existing mapping by name) a fresh, empty backing file was handed to us instead. Reject
@@ -459,8 +440,8 @@ public:
     }
 
     template <typename... Args>
-    [[nodiscard]] static auto makeQueue(Args&&... args) noexcept
-        -> std::expected<SPSCMessageQueueImpl<Options>, std::error_code> {
+    [[nodiscard]] static auto makeQueue(
+        Args&&... args) noexcept -> std::expected<SPSCMessageQueueImpl<Options>, std::error_code> {
         try {
             return {SPSCMessageQueueImpl{std::forward<Args>(args)...}};
         } catch (std::system_error const& e) {
