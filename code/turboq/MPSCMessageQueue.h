@@ -45,22 +45,6 @@ struct MPSCMessageQueueLayout {
     static_assert(std::is_trivially_copyable_v<MemoryHeader>);
     static_assert(std::is_trivially_copyable_v<MessageHeader>);
     static_assert(std::is_trivially_copyable_v<StateHeader>);
-
-    static constexpr auto getMemoryHeaderBufferSize() noexcept -> std::size_t {
-        return detail::align_up(sizeof(MemoryHeader), kCacheLineSize);
-    }
-
-    static constexpr auto getMessageHeaderBufferSize() noexcept -> std::size_t {
-        return detail::align_up(sizeof(MessageHeader), kCacheLineSize);
-    }
-
-    static constexpr auto adjustMessageBufferSize(std::size_t payloadSize) noexcept -> std::size_t {
-        return getMessageHeaderBufferSize() + payloadSize;
-    }
-
-    static constexpr auto adjustSlotBufferSize(std::size_t payloadSize) noexcept -> std::size_t {
-        return getMessageHeaderBufferSize() + detail::align_up(payloadSize, kCacheLineSize);
-    }
 };
 
 /// MPSC queue producer
@@ -107,7 +91,7 @@ public:
         auto content = storage_.content();
         header_ = std::bit_cast<MemoryHeader*>(storage_.data());
 
-        std::size_t offset = Details::getMemoryHeaderBufferSize();
+        std::size_t offset = detail::align_up(sizeof(MemoryHeader), kCacheLineSize);
         data_ = content.subspan(offset, header_->slotSize * header_->length);
 
         offset += header_->slotSize * header_->length;
@@ -134,8 +118,9 @@ public:
     /// Reserve contiguous space for writing without making it visible to the consumers, throws on size exceed slot max
     /// message size
     [[nodiscard]] TURBOQ_FORCE_INLINE auto prepare(std::size_t size) -> std::span<std::byte> {
-        constexpr auto headerBufferSize = Details::getMessageHeaderBufferSize();
-        auto const messageBufferSize = Details::adjustMessageBufferSize(size);
+        constexpr auto headerBufferSize = detail::align_up(sizeof(MessageHeader), kCacheLineSize);
+        auto const messageBufferSize =
+            headerBufferSize + size; // no need to align buffer size, because slot buffer size already aligned
 
         if (messageBufferSize > header_->slotSize) [[unlikely]] {
             throw std::system_error{makeErrorCode(Error::MessageSizeExceedSlotSize), "message size exceed slot size"};
@@ -150,8 +135,8 @@ public:
         }
 
         while (!std::atomic_ref(header_->producerPos)
-                .compare_exchange_weak(currentProducerPos, currentProducerPos + 1, std::memory_order_release,
-                    std::memory_order_relaxed)) [[unlikely]] {
+                    .compare_exchange_weak(currentProducerPos, currentProducerPos + 1, std::memory_order_release,
+                        std::memory_order_relaxed)) [[unlikely]] {
             if (currentProducerPos - consumerPosCache_ >= header_->length) [[unlikely]] {
                 return {};
             }
@@ -229,7 +214,7 @@ public:
         auto content = storage_.content();
         header_ = std::bit_cast<MemoryHeader*>(storage_.data());
 
-        std::size_t offset = Details::getMemoryHeaderBufferSize();
+        std::size_t offset = detail::align_up(sizeof(MemoryHeader), kCacheLineSize);
         data_ = content.subspan(offset, header_->slotSize * header_->length);
 
         offset += header_->slotSize * header_->length;
@@ -276,9 +261,10 @@ public:
         lastMessageHeader_ = std::bit_cast<MessageHeader*>(data_.data() + consumerPos * header_->slotSize);
         assert((reinterpret_cast<uintptr_t>(lastMessageHeader_) & (kCacheLineSize - 1)) == 0);
 
+        constexpr auto headerBufferSize = detail::align_up(sizeof(MessageHeader), kCacheLineSize);
+
         return std::span<std::byte const>{
-            std::bit_cast<std::byte*>(lastMessageHeader_) + Details::getMessageHeaderBufferSize(),
-            lastMessageHeader_->payloadSize};
+            std::bit_cast<std::byte*>(lastMessageHeader_) + headerBufferSize, lastMessageHeader_->payloadSize};
     }
 
     /// Consume buffer and make buffer space available for producer
@@ -307,19 +293,19 @@ public:
 /// Memory layout:
 ///
 ///    MemoryHeader                      data_ (length fixed-size slots)                commitStates_
-///   +------------------------+----------+----------+----------+     +----------+----+----+-----+----+
+///   +------------------------+----------+----------+----------+     +----------+----+----+-----+-----+
 ///   | tag | slotSize | length| Slot 0   | Slot 1   | Slot 2   | ... | Slot N-1 |  StateHeader[0..N-1]|
 ///   | consumerPos|producerPos|          |          |          |     |          |  (1 cache line each)|
-///   +------------------------+----------+----------+----------+     +----------+----+----+-----+----+
+///   +------------------------+----------+----------+----------+     +----------+----+----+-----+-----+
 ///
 /// Unlike SPSC/MulticastQueue, this is a *fixed-size circular array* of `length` slots (always a
 /// power of two), not a variable-size byte ring: slot index = producerPos & (length - 1), so a
 /// given slot always lives at the same byte offset no matter how many times the ring has wrapped.
 /// Each slot is laid out as:
 ///
-///   +--------+--------------------------------------+
+///   +--------+-------------------------------------------------+
 ///   | Header | Payload (up to slotSize - sizeof(Header) bytes) |
-///   +--------+--------------------------------------+
+///   +--------+-------------------------------------------------+
 ///
 /// commitStates_ is a *separate* array living after all the slots, one StateHeader per slot, each
 /// padded out to its own cache line. A producer reserves a slot via compare_exchange on
@@ -390,10 +376,12 @@ public:
 
         auto const fileSize = getFileSizeResult.value();
 
-        auto const slotSize = Details::adjustSlotBufferSize(options.slotSizeHint);
+        // calculate slot exactly size
+        auto const slotSize = detail::align_up(sizeof(MessageHeader), kCacheLineSize) +
+                              detail::align_up(options.slotSizeHint, kCacheLineSize);
         auto const length = detail::upper_pow_2(options.lengthHint);
         auto const capacityHint =
-            Details::getMemoryHeaderBufferSize() + slotSize * length + sizeof(StateHeader) * length;
+            detail::align_up(sizeof(MemoryHeader), kCacheLineSize) + slotSize * length + sizeof(StateHeader) * length;
         // round-up requested size to page size
         auto const capacity = detail::align_up(capacityHint, pageSize);
 
@@ -447,7 +435,7 @@ public:
         if (!getFileSizeResult) {
             throw std::system_error{getFileSizeResult.error(), "failed to get queue file size"};
         }
-        if (getFileSizeResult.value() < Details::getMemoryHeaderBufferSize()) {
+        if (getFileSizeResult.value() < detail::align_up(sizeof(MemoryHeader), kCacheLineSize)) {
             throw std::system_error{makeErrorCode(Error::BufferTooSmall), "queue file too small to be a valid queue"};
         }
 
@@ -468,8 +456,8 @@ public:
     }
 
     template <typename... Args>
-    [[nodiscard]] static auto makeQueue(Args&&... args) noexcept
-        -> std::expected<MPSCMessageQueueImpl<Options>, std::error_code> {
+    [[nodiscard]] static auto makeQueue(
+        Args&&... args) noexcept -> std::expected<MPSCMessageQueueImpl<Options>, std::error_code> {
         try {
             return {MPSCMessageQueueImpl{std::forward<Args>(args)...}};
         } catch (std::system_error const& e) {
