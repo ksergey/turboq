@@ -140,47 +140,36 @@ public:
         }
 
         auto const consumerPosCache = std::atomic_ref(header_->consumerPos).load(std::memory_order_acquire);
+
         if (consumerPosCache > producerPosCache_) {
-            // queue is empty in case of consumerPos == producerPos
+            // consumer has passed producer: queue is empty or wrapping
+            minFreeSpace_ = consumerPosCache - producerPosCache_ - 1;
+        } else {
+            // producer has not lapsed consumer: space at end of buffer
+            minFreeSpace_ = data_.size() - producerPosCache_ - Details::kMessageHeaderBufferSize;
+        }
+
+        if (messageBufferSize <= minFreeSpace_) [[likely]] {
+            lastMessageHeader_ = std::bit_cast<MessageHeader*>(data_.data() + producerPosCache_);
+            lastMessageHeader_->size = payloadBufferSize;
+            lastMessageHeader_->payloadSize = size;
+            lastMessageHeader_->payloadOffset = producerPosCache_ + Details::kMessageHeaderBufferSize;
+            producerPosCache_ += messageBufferSize;
+            minFreeSpace_ -= messageBufferSize;
+
+            return data_.subspan(lastMessageHeader_->payloadOffset, lastMessageHeader_->payloadSize);
+        }
+
+        // align payload to cache-line size when payload starts from beginning (wrap-around case)
+        if (payloadBufferSize < consumerPosCache) {
+            lastMessageHeader_ = std::bit_cast<MessageHeader*>(data_.data() + producerPosCache_);
+            lastMessageHeader_->size = payloadBufferSize;
+            lastMessageHeader_->payloadSize = size;
+            lastMessageHeader_->payloadOffset = 0;
+            producerPosCache_ = lastMessageHeader_->size;
             minFreeSpace_ = consumerPosCache - producerPosCache_ - 1;
 
-            if (messageBufferSize <= minFreeSpace_) [[likely]] {
-                lastMessageHeader_ = std::bit_cast<MessageHeader*>(data_.data() + producerPosCache_);
-                lastMessageHeader_->size = payloadBufferSize;
-                lastMessageHeader_->payloadSize = size;
-                lastMessageHeader_->payloadOffset = producerPosCache_ + Details::kMessageHeaderBufferSize;
-                producerPosCache_ += messageBufferSize;
-                minFreeSpace_ -= messageBufferSize;
-
-                return data_.subspan(lastMessageHeader_->payloadOffset, lastMessageHeader_->payloadSize);
-            }
-        } else {
-            assert(Details::kMessageHeaderBufferSize <= (data_.size() - producerPosCache_));
-
-            minFreeSpace_ = data_.size() - producerPosCache_ - Details::kMessageHeaderBufferSize;
-
-            if (messageBufferSize <= minFreeSpace_) [[likely]] {
-                lastMessageHeader_ = std::bit_cast<MessageHeader*>(data_.data() + producerPosCache_);
-                lastMessageHeader_->size = payloadBufferSize;
-                lastMessageHeader_->payloadSize = size;
-                lastMessageHeader_->payloadOffset = producerPosCache_ + Details::kMessageHeaderBufferSize;
-                producerPosCache_ += messageBufferSize;
-                minFreeSpace_ -= messageBufferSize;
-
-                return data_.subspan(lastMessageHeader_->payloadOffset, lastMessageHeader_->payloadSize);
-            }
-
-            // align payload to cache-line size when payload starts from beginning
-            if (payloadBufferSize < consumerPosCache) {
-                lastMessageHeader_ = std::bit_cast<MessageHeader*>(data_.data() + producerPosCache_);
-                lastMessageHeader_->size = payloadBufferSize;
-                lastMessageHeader_->payloadSize = size;
-                lastMessageHeader_->payloadOffset = 0;
-                producerPosCache_ = lastMessageHeader_->size;
-                minFreeSpace_ = consumerPosCache - producerPosCache_ - 1;
-
-                return data_.subspan(lastMessageHeader_->payloadOffset, lastMessageHeader_->payloadSize);
-            }
+            return data_.subspan(lastMessageHeader_->payloadOffset, lastMessageHeader_->payloadSize);
         }
 
         return {};
@@ -296,7 +285,7 @@ public:
 ///
 ///    MemoryHeader                                    data_ (ring buffer of variable-size messages)
 ///   +--------------------------------+---------------------------------------------------------------+
-///   | tag | producerPos | consumerPos| Header | Payload | Header | Payload | ...  |    free space      |
+///   | tag | producerPos | consumerPos| Header | Payload | Header | Payload | ...  |    free space    |
 ///   +--------------------------------+---------------------------------------------------------------+
 ///    each field cache-line aligned    ^ each Header/Payload pair cache-line aligned
 ///

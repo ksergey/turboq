@@ -17,6 +17,7 @@
 #include "Math.h"
 #include "MemorySource.h"
 #include "Platform.h"
+#include "Utils.h"
 
 namespace turboq {
 namespace detail {
@@ -153,6 +154,8 @@ public:
             if (currentProducerPos - consumerPosCache_ >= header_->length) [[unlikely]] {
                 return {};
             }
+
+            cpuRelax();
         }
 
         producerPosCache_ = currentProducerPos & (header_->length - 1);
