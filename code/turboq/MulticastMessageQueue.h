@@ -14,9 +14,9 @@
 
 #include "Error.h"
 #include "MappedRegion.h"
+#include "Math.h"
 #include "MemorySource.h"
 #include "Platform.h"
-#include "detail/math.h"
 
 namespace turboq {
 namespace detail {
@@ -104,7 +104,7 @@ public:
 
         auto content = storage_.content();
         header_ = std::bit_cast<MemoryHeader*>(storage_.data());
-        data_ = content.subspan(detail::align_up(sizeof(MemoryHeader), kCacheLineSize));
+        data_ = content.subspan(alignUp(sizeof(MemoryHeader), kCacheLineSize));
         producerPosCache_ = std::atomic_ref(header_->producerPos).load(std::memory_order_acquire);
     }
 
@@ -120,8 +120,8 @@ public:
 
     /// Reserve contiguous space for writing without making it visible to the consumers
     [[nodiscard]] TURBOQ_FORCE_INLINE auto prepare(std::size_t size) noexcept -> std::span<std::byte> {
-        constexpr auto headerBufferSize = detail::align_up(sizeof(MessageHeader), kCacheLineSize);
-        auto const payloadBufferSize = detail::align_up(size, kCacheLineSize);
+        constexpr auto headerBufferSize = alignUp(sizeof(MessageHeader), kCacheLineSize);
+        auto const payloadBufferSize = alignUp(size, kCacheLineSize);
         auto const messageBufferSize = headerBufferSize + payloadBufferSize;
 
         assert((messageBufferSize & (kCacheLineSize - 1)) == 0);
@@ -211,7 +211,7 @@ public:
 
         auto content = storage_.content();
         header_ = std::bit_cast<MemoryHeader*>(content.data());
-        data_ = content.subspan(detail::align_up(sizeof(MemoryHeader), kCacheLineSize));
+        data_ = content.subspan(alignUp(sizeof(MemoryHeader), kCacheLineSize));
         consumerPosCache_ = std::atomic_ref(header_->producerPos).load(std::memory_order_relaxed);
         producerPosCache_ = consumerPosCache_;
 
@@ -378,7 +378,7 @@ public:
         auto const fileSize = getFileSizeResult.value();
 
         // align up capacity hint to page size
-        auto const capacity = detail::align_up(options.capacityHint, pageSize);
+        auto const capacity = alignUp(options.capacityHint, pageSize);
 
         if (fileSize == 0) {
             // init queue on created
@@ -427,7 +427,7 @@ public:
         if (!getFileSizeResult) {
             throw std::system_error{getFileSizeResult.error(), "failed to get queue file size"};
         }
-        if (getFileSizeResult.value() < detail::align_up(sizeof(MemoryHeader), kCacheLineSize)) {
+        if (getFileSizeResult.value() < alignUp(sizeof(MemoryHeader), kCacheLineSize)) {
             throw std::system_error{makeErrorCode(Error::BufferTooSmall), "queue file too small to be a valid queue"};
         }
 
@@ -448,8 +448,8 @@ public:
     }
 
     template <typename... Args>
-    [[nodiscard]] static auto makeQueue(
-        Args&&... args) noexcept -> std::expected<MulticastMessageQueueImpl<Options>, std::error_code> {
+    [[nodiscard]] static auto makeQueue(Args&&... args) noexcept
+        -> std::expected<MulticastMessageQueueImpl<Options>, std::error_code> {
         try {
             return {MulticastMessageQueueImpl{std::forward<Args>(args)...}};
         } catch (std::system_error const& e) {
