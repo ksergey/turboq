@@ -46,12 +46,18 @@ struct MPSCMessageQueueLayout {
     static_assert(std::is_trivially_copyable_v<MessageHeader>);
     static_assert(std::is_trivially_copyable_v<StateHeader>);
 
+    /// Aligns size to cache line boundary
+    /// Used to prevent false sharing between producer and consumer
     static constexpr auto makeCacheLineAligned(std::size_t size) noexcept -> std::size_t {
         return alignUp(size, kCacheLineSize);
     }
 
+    /// Size of the memory header buffer, aligned to cache line
+    /// Contains tag, slotSize, length, consumerPos, producerPos fields
     static constexpr auto kMemoryHeaderBufferSize = makeCacheLineAligned(sizeof(MemoryHeader));
 
+    /// Size of the message header buffer, aligned to cache line
+    /// Contains payloadSize field
     static constexpr auto kMessageHeaderBufferSize = makeCacheLineAligned(sizeof(MessageHeader));
 };
 
