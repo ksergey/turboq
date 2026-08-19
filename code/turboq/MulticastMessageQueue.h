@@ -60,6 +60,14 @@ struct MulticastMessageQueueLayout {
     static_assert(std::atomic_ref<std::size_t>::is_always_lock_free);
     static_assert(std::is_trivially_copyable_v<MemoryHeader>);
     static_assert(std::is_trivially_copyable_v<MessageHeader>);
+
+    static constexpr auto makeCacheLineAligned(std::size_t size) noexcept -> std::size_t {
+        return alignUp(size, kCacheLineSize);
+    }
+
+    static constexpr auto kMemoryHeaderBufferSize = makeCacheLineAligned(sizeof(MemoryHeader));
+
+    static constexpr auto kMessageHeaderBufferSize = makeCacheLineAligned(sizeof(MessageHeader));
 };
 
 /// Multicast queue producer
@@ -104,7 +112,7 @@ public:
 
         auto content = storage_.content();
         header_ = std::bit_cast<MemoryHeader*>(storage_.data());
-        data_ = content.subspan(alignUp(sizeof(MemoryHeader), kCacheLineSize));
+        data_ = content.subspan(Details::kMemoryHeaderBufferSize);
         producerPosCache_ = std::atomic_ref(header_->producerPos).load(std::memory_order_acquire);
     }
 
@@ -120,9 +128,8 @@ public:
 
     /// Reserve contiguous space for writing without making it visible to the consumers
     [[nodiscard]] TURBOQ_FORCE_INLINE auto prepare(std::size_t size) noexcept -> std::span<std::byte> {
-        constexpr auto headerBufferSize = alignUp(sizeof(MessageHeader), kCacheLineSize);
-        auto const payloadBufferSize = alignUp(size, kCacheLineSize);
-        auto const messageBufferSize = headerBufferSize + payloadBufferSize;
+        auto const payloadBufferSize = Details::makeCacheLineAligned(size);
+        auto const messageBufferSize = Details::kMessageHeaderBufferSize + payloadBufferSize;
 
         assert((messageBufferSize & (kCacheLineSize - 1)) == 0);
 
@@ -132,10 +139,10 @@ public:
         lastMessageHeader_->sequence = nextSequence_++;
 
         // check enough space for current message + additional aligned header
-        if (producerPosCache_ + messageBufferSize + headerBufferSize > data_.size()) [[unlikely]] {
+        if (producerPosCache_ + messageBufferSize + Details::kMessageHeaderBufferSize > data_.size()) [[unlikely]] {
             producerPosCache_ = 0;
         } else {
-            producerPosCache_ += headerBufferSize;
+            producerPosCache_ += Details::kMessageHeaderBufferSize;
         }
 
         lastMessageHeader_->payloadOffset = producerPosCache_;
@@ -211,7 +218,7 @@ public:
 
         auto content = storage_.content();
         header_ = std::bit_cast<MemoryHeader*>(content.data());
-        data_ = content.subspan(alignUp(sizeof(MemoryHeader), kCacheLineSize));
+        data_ = content.subspan(Details::kMemoryHeaderBufferSize);
         consumerPosCache_ = std::atomic_ref(header_->producerPos).load(std::memory_order_relaxed);
         producerPosCache_ = consumerPosCache_;
 
@@ -427,7 +434,7 @@ public:
         if (!getFileSizeResult) {
             throw std::system_error{getFileSizeResult.error(), "failed to get queue file size"};
         }
-        if (getFileSizeResult.value() < alignUp(sizeof(MemoryHeader), kCacheLineSize)) {
+        if (getFileSizeResult.value() < Details::kMemoryHeaderBufferSize) {
             throw std::system_error{makeErrorCode(Error::BufferTooSmall), "queue file too small to be a valid queue"};
         }
 

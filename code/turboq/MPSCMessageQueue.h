@@ -45,6 +45,14 @@ struct MPSCMessageQueueLayout {
     static_assert(std::is_trivially_copyable_v<MemoryHeader>);
     static_assert(std::is_trivially_copyable_v<MessageHeader>);
     static_assert(std::is_trivially_copyable_v<StateHeader>);
+
+    static constexpr auto makeCacheLineAligned(std::size_t size) noexcept -> std::size_t {
+        return alignUp(size, kCacheLineSize);
+    }
+
+    static constexpr auto kMemoryHeaderBufferSize = makeCacheLineAligned(sizeof(MemoryHeader));
+
+    static constexpr auto kMessageHeaderBufferSize = makeCacheLineAligned(sizeof(MessageHeader));
 };
 
 /// MPSC queue producer
@@ -91,7 +99,7 @@ public:
         auto content = storage_.content();
         header_ = std::bit_cast<MemoryHeader*>(storage_.data());
 
-        std::size_t offset = alignUp(sizeof(MemoryHeader), kCacheLineSize);
+        std::size_t offset = Details::kMemoryHeaderBufferSize;
         data_ = content.subspan(offset, header_->slotSize * header_->length);
 
         offset += header_->slotSize * header_->length;
@@ -118,9 +126,8 @@ public:
     /// Reserve contiguous space for writing without making it visible to the consumers, throws on size exceed slot max
     /// message size
     [[nodiscard]] TURBOQ_FORCE_INLINE auto prepare(std::size_t size) -> std::span<std::byte> {
-        constexpr auto headerBufferSize = alignUp(sizeof(MessageHeader), kCacheLineSize);
-        auto const messageBufferSize =
-            headerBufferSize + size; // no need to align buffer size, because slot buffer size already aligned
+        auto const messageBufferSize = Details::kMessageHeaderBufferSize +
+                                       size; // no need to align buffer size, because slot buffer size already aligned
 
         if (messageBufferSize > header_->slotSize) [[unlikely]] {
             throw std::system_error{makeErrorCode(Error::MessageSizeExceedSlotSize), "message size exceed slot size"};
@@ -146,7 +153,7 @@ public:
         auto content = data_.data() + producerPosCache_ * header_->slotSize;
         std::bit_cast<MessageHeader*>(content)->payloadSize = size;
 
-        return {content + headerBufferSize, size};
+        return {content + Details::kMessageHeaderBufferSize, size};
     }
 
     /// Make reserved buffer visible for consumers
@@ -214,7 +221,7 @@ public:
         auto content = storage_.content();
         header_ = std::bit_cast<MemoryHeader*>(storage_.data());
 
-        std::size_t offset = alignUp(sizeof(MemoryHeader), kCacheLineSize);
+        std::size_t offset = Details::kMemoryHeaderBufferSize;
         data_ = content.subspan(offset, header_->slotSize * header_->length);
 
         offset += header_->slotSize * header_->length;
@@ -261,10 +268,9 @@ public:
         lastMessageHeader_ = std::bit_cast<MessageHeader*>(data_.data() + consumerPos * header_->slotSize);
         assert((reinterpret_cast<uintptr_t>(lastMessageHeader_) & (kCacheLineSize - 1)) == 0);
 
-        constexpr auto headerBufferSize = alignUp(sizeof(MessageHeader), kCacheLineSize);
-
         return std::span<std::byte const>{
-            std::bit_cast<std::byte*>(lastMessageHeader_) + headerBufferSize, lastMessageHeader_->payloadSize};
+            std::bit_cast<std::byte*>(lastMessageHeader_) + Details::kMessageHeaderBufferSize,
+            lastMessageHeader_->payloadSize};
     }
 
     /// Consume buffer and make buffer space available for producer
@@ -377,11 +383,9 @@ public:
         auto const fileSize = getFileSizeResult.value();
 
         // calculate slot exactly size
-        auto const slotSize =
-            alignUp(sizeof(MessageHeader), kCacheLineSize) + alignUp(options.slotSizeHint, kCacheLineSize);
+        auto const slotSize = Details::kMessageHeaderBufferSize + Details::makeCacheLineAligned(options.slotSizeHint);
         auto const length = upperPow2(options.lengthHint);
-        auto const capacityHint =
-            alignUp(sizeof(MemoryHeader), kCacheLineSize) + slotSize * length + sizeof(StateHeader) * length;
+        auto const capacityHint = Details::kMemoryHeaderBufferSize + slotSize * length + sizeof(StateHeader) * length;
         // round-up requested size to page size
         auto const capacity = alignUp(capacityHint, pageSize);
 
@@ -435,7 +439,7 @@ public:
         if (!getFileSizeResult) {
             throw std::system_error{getFileSizeResult.error(), "failed to get queue file size"};
         }
-        if (getFileSizeResult.value() < alignUp(sizeof(MemoryHeader), kCacheLineSize)) {
+        if (getFileSizeResult.value() < Details::kMemoryHeaderBufferSize) {
             throw std::system_error{makeErrorCode(Error::BufferTooSmall), "queue file too small to be a valid queue"};
         }
 

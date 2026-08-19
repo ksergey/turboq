@@ -40,6 +40,14 @@ struct SPSCMessageQueueLayout {
     static_assert(std::atomic_ref<std::size_t>::is_always_lock_free);
     static_assert(std::is_trivially_copyable_v<MemoryHeader>);
     static_assert(std::is_trivially_copyable_v<MessageHeader>);
+
+    static constexpr auto makeCacheLineAligned(std::size_t size) noexcept -> std::size_t {
+        return alignUp(size, kCacheLineSize);
+    }
+
+    static constexpr auto kMemoryHeaderBufferSize = makeCacheLineAligned(sizeof(MemoryHeader));
+
+    static constexpr auto kMessageHeaderBufferSize = makeCacheLineAligned(sizeof(MessageHeader));
 };
 
 /// SPSC queue producer
@@ -84,7 +92,7 @@ public:
 
         auto content = storage_.content();
         header_ = std::bit_cast<MemoryHeader*>(storage_.data());
-        data_ = content.subspan(alignUp(sizeof(MemoryHeader), kCacheLineSize));
+        data_ = content.subspan(Details::kMemoryHeaderBufferSize);
         producerPosCache_ = std::atomic_ref(header_->producerPos).load(std::memory_order_acquire);
 
         auto const consumerPos = std::atomic_ref(header_->consumerPos).load(std::memory_order_acquire);
@@ -93,7 +101,7 @@ public:
             minFreeSpace_ = consumerPos - producerPosCache_ - 1;
         } else {
             // Reserve space at end for last MessageHeader
-            minFreeSpace_ = data_.size() - producerPosCache_ - alignUp(sizeof(MessageHeader), kCacheLineSize);
+            minFreeSpace_ = data_.size() - producerPosCache_ - Details::kMessageHeaderBufferSize;
         }
     }
 
@@ -109,9 +117,8 @@ public:
 
     /// Reserve contiguous space for writing without making it visible to the consumers
     [[nodiscard]] TURBOQ_FORCE_INLINE auto prepare(std::size_t size) noexcept -> std::span<std::byte> {
-        constexpr auto headerBufferSize = alignUp(sizeof(MessageHeader), kCacheLineSize);
-        auto const payloadBufferSize = alignUp(size, kCacheLineSize);
-        auto const messageBufferSize = headerBufferSize + payloadBufferSize;
+        auto const payloadBufferSize = Details::makeCacheLineAligned(size);
+        auto const messageBufferSize = Details::kMessageHeaderBufferSize + payloadBufferSize;
 
         assert((messageBufferSize & (kCacheLineSize - 1)) == 0);
 
@@ -119,7 +126,7 @@ public:
             lastMessageHeader_ = std::bit_cast<MessageHeader*>(data_.data() + producerPosCache_);
             lastMessageHeader_->size = payloadBufferSize;
             lastMessageHeader_->payloadSize = size;
-            lastMessageHeader_->payloadOffset = producerPosCache_ + headerBufferSize;
+            lastMessageHeader_->payloadOffset = producerPosCache_ + Details::kMessageHeaderBufferSize;
             producerPosCache_ += messageBufferSize;
             minFreeSpace_ -= messageBufferSize;
 
@@ -135,22 +142,22 @@ public:
                 lastMessageHeader_ = std::bit_cast<MessageHeader*>(data_.data() + producerPosCache_);
                 lastMessageHeader_->size = payloadBufferSize;
                 lastMessageHeader_->payloadSize = size;
-                lastMessageHeader_->payloadOffset = producerPosCache_ + headerBufferSize;
+                lastMessageHeader_->payloadOffset = producerPosCache_ + Details::kMessageHeaderBufferSize;
                 producerPosCache_ += messageBufferSize;
                 minFreeSpace_ -= messageBufferSize;
 
                 return data_.subspan(lastMessageHeader_->payloadOffset, lastMessageHeader_->payloadSize);
             }
         } else {
-            assert(headerBufferSize <= (data_.size() - producerPosCache_));
+            assert(Details::kMessageHeaderBufferSize <= (data_.size() - producerPosCache_));
 
-            minFreeSpace_ = data_.size() - producerPosCache_ - headerBufferSize;
+            minFreeSpace_ = data_.size() - producerPosCache_ - Details::kMessageHeaderBufferSize;
 
             if (messageBufferSize <= minFreeSpace_) [[likely]] {
                 lastMessageHeader_ = std::bit_cast<MessageHeader*>(data_.data() + producerPosCache_);
                 lastMessageHeader_->size = payloadBufferSize;
                 lastMessageHeader_->payloadSize = size;
-                lastMessageHeader_->payloadOffset = producerPosCache_ + headerBufferSize;
+                lastMessageHeader_->payloadOffset = producerPosCache_ + Details::kMessageHeaderBufferSize;
                 producerPosCache_ += messageBufferSize;
                 minFreeSpace_ -= messageBufferSize;
 
@@ -232,7 +239,7 @@ public:
 
         auto content = storage_.content();
         header_ = std::bit_cast<MemoryHeader*>(content.data());
-        data_ = content.subspan(alignUp(sizeof(MemoryHeader), kCacheLineSize));
+        data_ = content.subspan(Details::kMemoryHeaderBufferSize);
         consumerPosCache_ = std::atomic_ref(header_->consumerPos).load(std::memory_order_relaxed);
         producerPosCache_ = std::atomic_ref(header_->producerPos).load(std::memory_order_acquire);
 
@@ -414,7 +421,7 @@ public:
         if (!getFileSizeResult) {
             throw std::system_error{getFileSizeResult.error(), "failed to get queue file size"};
         }
-        if (getFileSizeResult.value() < alignUp(sizeof(MemoryHeader), kCacheLineSize)) {
+        if (getFileSizeResult.value() < Details::kMemoryHeaderBufferSize) {
             // Too small to hold even the memory header: either the queue was never created, or (for
             // memory sources like AnonymousMemorySource, where "open only" cannot truly look up an
             // existing mapping by name) a fresh, empty backing file was handed to us instead. Reject
