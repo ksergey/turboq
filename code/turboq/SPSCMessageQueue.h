@@ -317,7 +317,22 @@ private:
     using MemoryHeader = typename Details::MemoryHeader;
     using MessageHeader = typename Details::MessageHeader;
 
+    // Distinct bytes of the same fd, locked independently via File::tryLockRegion() (fcntl
+    // F_OFD_SETLK) -- unlike flock() (whole-file only, one lock per fd) this lets producer and
+    // consumer each get their own single-holder enforcement on the SAME open file, including when
+    // both live in this same process (see File.h's tryLockRegion() doc comment for why plain
+    // fcntl F_SETLK record locks can't be used safely for that same-process case).
+    static constexpr std::size_t kProducerLockOffset = 0;
+    static constexpr std::size_t kConsumerLockOffset = 1;
+
     File file_;
+    // In-process guard against calling createProducer()/createConsumer() twice on the SAME
+    // handle: tryLockRegion() re-locking from the same fd/OFD succeeds (it's a re-assertion of a
+    // lock this open file description already holds, not a conflict) -- it only protects against
+    // a genuinely different fd (a different process, or a separately-opened handle). These flags
+    // close that specific gap.
+    bool producerCreated_{false};
+    bool consumerCreated_{false};
 
     SPSCMessageQueueImpl(File file) noexcept : file_{std::move(file)} {}
 
@@ -333,7 +348,9 @@ public:
     SPSCMessageQueueImpl& operator=(SPSCMessageQueueImpl const&) = delete;
     SPSCMessageQueueImpl() = default;
 
-    SPSCMessageQueueImpl(SPSCMessageQueueImpl&& other) noexcept : file_{std::move(other.file_)} {}
+    SPSCMessageQueueImpl(SPSCMessageQueueImpl&& other) noexcept
+        : file_{std::move(other.file_)}, producerCreated_{std::exchange(other.producerCreated_, false)},
+          consumerCreated_{std::exchange(other.consumerCreated_, false)} {}
 
     SPSCMessageQueueImpl& operator=(SPSCMessageQueueImpl&& other) noexcept {
         if (this != &other) {
@@ -477,12 +494,20 @@ public:
     /// Create producer for the queue, throws std::system_error on error
     [[nodiscard]] TURBOQ_FORCE_INLINE auto createProducer() -> Producer {
         assert(file_);
+        if (producerCreated_ || !file_.tryLockRegion(kProducerLockOffset)) {
+            throw std::system_error{makeErrorCode(Error::ProducerAlreadyExists), "producer already exists"};
+        }
+        producerCreated_ = true;
         return Producer{MappedRegion{file_}};
     }
 
     /// Create consumer for the queue, throws std::system_error on error
     [[nodiscard]] TURBOQ_FORCE_INLINE auto createConsumer() -> Consumer {
         assert(file_);
+        if (consumerCreated_ || !file_.tryLockRegion(kConsumerLockOffset)) {
+            throw std::system_error{makeErrorCode(Error::ConsumerAlreadyExists), "consumer already exists"};
+        }
+        consumerCreated_ = true;
         return Consumer{MappedRegion{file_}};
     }
 };

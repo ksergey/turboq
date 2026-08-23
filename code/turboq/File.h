@@ -98,7 +98,7 @@ public:
     /// Close descriptor if owned. Throws on error.
     void close();
 
-    /// Duplicate file descriptor
+    /// Duplicate file descriptor (unused)
     [[nodiscard]] auto dup() const noexcept -> std::expected<File, std::error_code>;
 
     /// Create a temporary file.
@@ -123,6 +123,26 @@ public:
     /// Unlock file. Throws on error.
     void unlock();
 
+    /// Try to acquire an exclusive lock on a byte range [offset, offset + size) within this file,
+    /// via a Linux Open File Description lock (fcntl F_OFD_SETLK) rather than lock()/tryLock()'s
+    /// flock(), which locks the WHOLE file. Because this locks only that range, a single fd can
+    /// hold several independent locks at once by using disjoint ranges -- e.g. one for "am I the
+    /// only producer", another for "am I the only consumer", both on the same open file.
+    ///
+    /// And unlike classic POSIX record locks (fcntl F_SETLK), this is scoped to THIS open file
+    /// description, the same way flock() is: closing some unrelated fd that happens to reference
+    /// the same file does NOT release it. That distinction matters whenever a queue's producer
+    /// and consumer share one File within the same process -- with classic F_SETLK, closing
+    /// either one's fd would silently drop *both* locks, even though the other fd is still open.
+    [[nodiscard]] auto tryLockRegion(std::size_t offset, std::size_t size = 1) -> bool;
+
+    /// \see tryLockRegion(). Throws if the lock is already held.
+    void lockRegion(std::size_t offset, std::size_t size = 1);
+
+    /// Release a lock taken by tryLockRegion()/lockRegion(). offset and size must match what was
+    /// locked. Throws on error.
+    void unlockRegion(std::size_t offset, std::size_t size = 1);
+
     /// Get file size
     [[nodiscard]] auto tryGetFileSize() const noexcept -> std::expected<std::size_t, std::error_code>;
 
@@ -145,6 +165,8 @@ protected:
     void doLock(int op);
 
     auto doTryLock(int op) -> bool;
+
+    auto doRegionLock(short lockType, std::size_t offset, std::size_t size) -> bool;
 };
 
 } // namespace turboq

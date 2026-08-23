@@ -24,6 +24,13 @@ auto memfd_create(const char* name, unsigned int flags) -> int {
 #define MFD_CLOEXEC FD_CLOEXEC
 #endif
 
+#ifndef F_OFD_SETLK
+// Not yet in this libc's <fcntl.h> (glibc added the constant in 2.20, 2014) -- Linux itself has
+// supported the underlying command since kernel 3.15, the same release that introduced it, so
+// this is purely a header-vintage gap, not a runtime one.
+#define F_OFD_SETLK 37
+#endif
+
 #include "Error.h"
 
 namespace turboq {
@@ -52,17 +59,17 @@ auto flockNoInt(int fd, int op) noexcept -> int {
 File::File(OpenOnly, std::filesystem::path const& path, OpenMode openMode) {
     int fd = ::open(path.c_str(), makeOpenFlags(openMode) | O_CLOEXEC);
     if (fd == -1) {
-        throw std::system_error{errno, getPosixErrorCategory(), "open(...)"};
+        throw std::system_error{makePosixErrorCode(errno), "open(...)"};
     }
     this->reset(fd, true);
 }
 
 File::File(CreateOnly, std::filesystem::path const& path, OpenMode openMode, mode_t mode) {
-    int fd = ::open(path.c_str(), makeOpenFlags(openMode) | O_CLOEXEC | O_CREAT | O_EXCL);
+    int fd = ::open(path.c_str(), makeOpenFlags(openMode) | O_CLOEXEC | O_CREAT | O_EXCL, mode);
     if (fd == -1) {
-        throw std::system_error{errno, getPosixErrorCategory(), "open(...)"};
+        throw std::system_error{makePosixErrorCode(errno), "open(...)"};
     }
-    ::fchmod(fd, mode);
+    ::fchmod(fd, mode); // open()'s mode is subject to umask; fchmod() here guarantees the exact requested mode
     this->reset(fd, true);
 }
 
@@ -82,7 +89,7 @@ File::File(OpenOrCreate, std::filesystem::path const& path, OpenMode openMode, m
         break;
     }
     if (fd == -1) {
-        throw std::system_error{errno, getPosixErrorCategory(), "open(...)"};
+        throw std::system_error{makePosixErrorCode(errno), "open(...)"};
     }
     this->reset(fd, true);
 }
@@ -106,7 +113,7 @@ auto File::release() noexcept -> int {
 }
 
 auto File::closeNoThrow() noexcept -> std::expected<void, std::error_code> {
-    int const rc = owns_ ? ::close(fd_) : 0;
+    auto const rc = owns_ ? ::close(fd_) : 0;
     this->release();
     if (rc != 0) {
         return std::unexpected(makePosixErrorCode(errno));
@@ -123,7 +130,7 @@ void File::close() {
 
 auto File::dup() const noexcept -> std::expected<File, std::error_code> {
     if (this->valid()) {
-        int fd = ::dup(this->get());
+        int const fd = ::dup(this->get());
         if (fd == -1) {
             return std::unexpected(makePosixErrorCode(errno));
         }
@@ -168,13 +175,46 @@ auto File::tryLockShared() -> bool {
 void File::unlock() {
     int rc = flockNoInt(this->get(), LOCK_UN);
     if (rc == -1) {
-        throw std::system_error{errno, getPosixErrorCategory(), "flock(...)"};
+        throw std::system_error{makePosixErrorCode(errno), "flock(...)"};
     }
+}
+
+void File::lockRegion(std::size_t offset, std::size_t size) {
+    if (!this->doRegionLock(F_WRLCK, offset, size)) {
+        throw std::system_error{makePosixErrorCode(errno), "fcntl(F_OFD_SETLK, ...)"};
+    }
+}
+
+auto File::tryLockRegion(std::size_t offset, std::size_t size) -> bool {
+    return this->doRegionLock(F_WRLCK, offset, size);
+}
+
+void File::unlockRegion(std::size_t offset, std::size_t size) {
+    if (!this->doRegionLock(F_UNLCK, offset, size)) {
+        throw std::system_error{makePosixErrorCode(errno), "fcntl(F_OFD_SETLK, ...)"};
+    }
+}
+
+auto File::doRegionLock(short lockType, std::size_t offset, std::size_t size) -> bool {
+    struct flock fl{};
+    fl.l_type = lockType;
+    fl.l_whence = SEEK_SET;
+    fl.l_start = static_cast<off_t>(offset);
+    fl.l_len = static_cast<off_t>(size);
+    fl.l_pid = 0; // required to be 0 for F_OFD_* commands
+
+    if (auto const rc = ::fcntl(this->get(), F_OFD_SETLK, &fl); rc == -1) {
+        if (errno == EACCES || errno == EAGAIN) {
+            return false;
+        }
+        throw std::system_error{makePosixErrorCode(errno), "fcntl(F_OFD_SETLK, ...)"};
+    }
+    return true;
 }
 
 auto File::tryGetFileSize() const noexcept -> std::expected<std::size_t, std::error_code> {
     struct stat st;
-    if (::fstat(this->get(), &st) == -1) {
+    if (auto const rc = ::fstat(this->get(), &st); rc == -1) {
         return std::unexpected(makePosixErrorCode(errno));
     }
     return {std::size_t(st.st_size)};
@@ -182,37 +222,35 @@ auto File::tryGetFileSize() const noexcept -> std::expected<std::size_t, std::er
 
 auto File::getFileSize() const -> std::size_t {
     struct stat st;
-    if (::fstat(this->get(), &st) == -1) {
-        throw std::system_error{errno, getPosixErrorCategory(), "fstat(...)"};
+    if (auto const rc = ::fstat(this->get(), &st); rc == -1) {
+        throw std::system_error{makePosixErrorCode(errno), "fstat(...)"};
     }
     return st.st_size;
 }
 
 auto File::tryTruncate(std::size_t size) const noexcept -> std::expected<void, std::error_code> {
-    if (::ftruncate(this->get(), size) == -1) {
+    if (auto const rc = ::ftruncate(this->get(), size); rc == -1) {
         return std::unexpected(makePosixErrorCode(errno));
     }
     return {};
 }
 
 void File::truncate(std::size_t size) const {
-    if (::ftruncate(this->get(), size) == -1) {
-        throw std::system_error{errno, getPosixErrorCategory(), "ftruncate(...)"};
+    if (auto const rc = ::ftruncate(this->get(), size); rc == -1) {
+        throw std::system_error{makePosixErrorCode(errno), "ftruncate(...)"};
     }
 }
 
 void File::doLock(int op) {
-    int rc = flockNoInt(this->get(), op | LOCK_NB);
-    if (rc == -1) {
-        throw std::system_error{errno, getPosixErrorCategory(), "flock(...)"};
+    if (auto const rc = flockNoInt(this->get(), op | LOCK_NB); rc == -1) {
+        throw std::system_error{makePosixErrorCode(errno), "flock(...)"};
     }
 }
 
 auto File::doTryLock(int op) -> bool {
-    int rc = flockNoInt(this->get(), op | LOCK_NB);
-    if (rc == -1) {
+    if (auto const rc = flockNoInt(this->get(), op | LOCK_NB); rc == -1) {
         if (errno != EWOULDBLOCK) {
-            throw std::system_error{errno, getPosixErrorCategory(), "flock(...)"};
+            throw std::system_error{makePosixErrorCode(errno), "flock(...)"};
         }
         return false;
     }
