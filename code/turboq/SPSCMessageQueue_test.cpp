@@ -98,7 +98,7 @@ TEST_SUITE("SPSC") {
         REQUIRE_FALSE(result);
     }
 
-    TEST_CASE("re-opening with a mismatched capacity fails") {
+    TEST_CASE_FIXTURE(MemorySourceFixture, "re-opening with a mismatched capacity fails") {
         auto source = makeTempMemorySource();
 
         auto created = SPSCMessageQueue::makeQueue(
@@ -110,7 +110,7 @@ TEST_SUITE("SPSC") {
         REQUIRE_FALSE(reopened);
     }
 
-    TEST_CASE("opening a queue created with a different tag fails") {
+    TEST_CASE_FIXTURE(MemorySourceFixture, "opening a queue created with a different tag fails") {
         auto source = makeTempMemorySource();
 
         auto created = SPSCMessageQueue::makeQueue(
@@ -121,7 +121,7 @@ TEST_SUITE("SPSC") {
         REQUIRE_FALSE(reopened);
     }
 
-    TEST_CASE("makeProducer / makeConsumer create working endpoints directly") {
+    TEST_CASE_FIXTURE(MemorySourceFixture, "makeProducer / makeConsumer create working endpoints directly") {
         auto source = makeTempMemorySource();
 
         auto producer = SPSCMessageQueue::makeProducer(
@@ -200,7 +200,7 @@ TEST_SUITE("SPSC") {
         REQUIRE_EQ(msg.seq, 8);
     }
 
-    TEST_CASE("a second producer is rejected while the first is alive") {
+    TEST_CASE_FIXTURE(MemorySourceFixture, "a second producer is rejected while the first is alive") {
         auto source = makeTempMemorySource();
 
         auto created = SPSCMessageQueue::makeQueue(
@@ -220,7 +220,7 @@ TEST_SUITE("SPSC") {
         REQUIRE_THROWS_AS((void)handleB.createProducer(), std::system_error);
     }
 
-    TEST_CASE("a second consumer is rejected while the first is alive") {
+    TEST_CASE_FIXTURE(MemorySourceFixture, "a second consumer is rejected while the first is alive") {
         auto source = makeTempMemorySource();
 
         auto created = SPSCMessageQueue::makeQueue(
@@ -271,7 +271,7 @@ TEST_SUITE("SPSC") {
     // flock(): producer and consumer must NOT contend with each other, including from a second,
     // independently-opened handle on the same queue -- a rejected producer (because one already
     // exists) must not prevent the SAME second handle from successfully taking the consumer slot.
-    TEST_CASE("producer and consumer locks are independent, even across handles") {
+    TEST_CASE_FIXTURE(MemorySourceFixture, "producer and consumer locks are independent, even across handles") {
         auto source = makeTempMemorySource();
 
         auto created = SPSCMessageQueue::makeQueue(
@@ -330,7 +330,7 @@ TEST_SUITE("File region locks") {
         auto fileB = std::move(createdB).value();
 
         REQUIRE_FALSE(fileB.tryLockRegion(4, 8)); // [4, 12) overlaps [0, 8) -- must be rejected
-        REQUIRE(fileB.tryLockRegion(8, 8));        // [8, 16) does not overlap -- must succeed
+        REQUIRE(fileB.tryLockRegion(8, 8));       // [8, 16) does not overlap -- must succeed
 
         std::filesystem::remove(path);
     }

@@ -115,7 +115,7 @@ TEST_SUITE("MulticastMessageQueue") {
         REQUIRE_EQ(msg.seq, 100);
     }
 
-    TEST_CASE("a second producer is rejected while the first is alive") {
+    TEST_CASE_FIXTURE(MemorySourceFixture, "a second producer is rejected while the first is alive") {
         auto source = makeTempMemorySource();
 
         auto created = MulticastMessageQueue::makeQueue(

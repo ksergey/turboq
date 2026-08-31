@@ -22,11 +22,19 @@
 #include "ScopeGuard.h"
 
 namespace turboq {
+namespace detail {
+
+auto getDefaultPageSize() noexcept -> std::size_t {
+    static const auto pageSize = static_cast<std::size_t>(::sysconf(_SC_PAGESIZE));
+    return pageSize;
+}
+
+} // namespace detail
+
 namespace {
 
-std::size_t const gDefaultPageSize{static_cast<std::size_t>(::sysconf(_SC_PAGESIZE))};
-constexpr std::size_t gPageSize2M{2 * 1024 * 1024};
-constexpr std::size_t gPageSize1G{1 * 1024 * 1024 * 1024};
+constexpr auto kPageSize2M = static_cast<std::size_t>(2 * 1024 * 1024);
+constexpr auto kPageSize1G = static_cast<std::size_t>(1 * 1024 * 1024 * 1024);
 
 auto getDefaultHugePageSize() noexcept -> std::expected<std::size_t, std::error_code> {
     using namespace std::string_view_literals;
@@ -79,9 +87,9 @@ auto getPageSizeFromMountOpts(std::string_view opts) noexcept -> std::expected<s
         }
         std::string_view value = option.substr("pagesize="sv.size());
         if (value == "2M"sv) {
-            return {gPageSize2M};
+            return {kPageSize2M};
         } else if (value == "1G"sv) {
-            return {gPageSize1G};
+            return {kPageSize1G};
         } else {
             return std::unexpected(makePosixErrorCode(EINVAL));
         }
@@ -118,7 +126,7 @@ auto readProcMounts() -> std::vector<MemoryMountPoint> {
         if (mntent.mnt_fsname == "tmpfs"sv) {
             auto& entry = entries.emplace_back();
             entry.path = mntent.mnt_dir;
-            entry.pageSize = gDefaultPageSize;
+            entry.pageSize = detail::getDefaultPageSize();
             continue;
         }
 
@@ -149,10 +157,10 @@ auto getProcMounts() -> std::vector<MemoryMountPoint> const& {
     return entries;
 }
 
-auto getMountEntry1G(std::vector<MemoryMountPoint> const& mounts) noexcept
-    -> std::expected<MemoryMountPoint, std::error_code> {
+auto getMountEntry1G(
+    std::vector<MemoryMountPoint> const& mounts) noexcept -> std::expected<MemoryMountPoint, std::error_code> {
     auto const found = std::ranges::find_if(mounts, [](auto const& entry) {
-        return entry.pageSize == gPageSize1G;
+        return entry.pageSize == kPageSize1G;
     });
     if (found == mounts.end()) {
         return std::unexpected(makePosixErrorCode(ENOENT));
@@ -160,10 +168,10 @@ auto getMountEntry1G(std::vector<MemoryMountPoint> const& mounts) noexcept
     return {*found};
 }
 
-auto getMountEntry2M(std::vector<MemoryMountPoint> const& mounts) noexcept
-    -> std::expected<MemoryMountPoint, std::error_code> {
+auto getMountEntry2M(
+    std::vector<MemoryMountPoint> const& mounts) noexcept -> std::expected<MemoryMountPoint, std::error_code> {
     auto const found = std::ranges::find_if(mounts, [](auto const& entry) {
-        return entry.pageSize == gPageSize2M;
+        return entry.pageSize == kPageSize2M;
     });
     if (found == mounts.end()) {
         return std::unexpected(makePosixErrorCode(ENOENT));
@@ -171,8 +179,8 @@ auto getMountEntry2M(std::vector<MemoryMountPoint> const& mounts) noexcept
     return {*found};
 }
 
-auto getMountEntryDefault(std::vector<MemoryMountPoint> const& mounts) noexcept
-    -> std::expected<MemoryMountPoint, std::error_code> {
+auto getMountEntryDefault(
+    std::vector<MemoryMountPoint> const& mounts) noexcept -> std::expected<MemoryMountPoint, std::error_code> {
     using namespace std::string_view_literals;
 
     auto found = std::ranges::find_if(mounts, [](auto const& entry) {
@@ -189,8 +197,8 @@ auto getMountEntryDefault(std::vector<MemoryMountPoint> const& mounts) noexcept
     return {*found};
 }
 
-auto getMountEntryAuto(std::vector<MemoryMountPoint> const& mounts) noexcept
-    -> std::expected<MemoryMountPoint, std::error_code> {
+auto getMountEntryAuto(
+    std::vector<MemoryMountPoint> const& mounts) noexcept -> std::expected<MemoryMountPoint, std::error_code> {
     HugePagesOption type = HugePagesOption::HugePages1G;
 
     for (;;) {
@@ -260,8 +268,8 @@ DefaultMemorySource::DefaultMemorySource(std::filesystem::path const& path, std:
     }
 }
 
-auto DefaultMemorySource::open(std::string_view name, OpenFlags flags) const noexcept
-    -> std::expected<std::tuple<File, std::size_t>, std::error_code> {
+auto DefaultMemorySource::open(std::string_view name,
+    OpenFlags flags) const noexcept -> std::expected<std::tuple<File, std::size_t>, std::error_code> {
     if (flags != OpenFlags::OpenOnly && flags != OpenFlags::OpenOrCreate) {
         return std::unexpected(makePosixErrorCode(EINVAL));
     }
@@ -275,13 +283,13 @@ auto DefaultMemorySource::open(std::string_view name, OpenFlags flags) const noe
     return {std::make_tuple(std::move(result).value(), pageSize_)};
 }
 
-auto AnonymousMemorySource::open(std::string_view name, [[maybe_unused]] OpenFlags flags) const noexcept
-    -> std::expected<std::tuple<File, std::size_t>, std::error_code> {
+auto AnonymousMemorySource::open(std::string_view name,
+    [[maybe_unused]] OpenFlags flags) const noexcept -> std::expected<std::tuple<File, std::size_t>, std::error_code> {
     auto result = File::anonymous(std::string{name}.c_str());
     if (!result) {
         return std::unexpected(result.error());
     }
-    return {std::make_tuple(std::move(result).value(), gDefaultPageSize)};
+    return {std::make_tuple(std::move(result).value(), detail::getDefaultPageSize())};
 }
 
 } // namespace turboq

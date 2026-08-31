@@ -12,6 +12,12 @@
 #include "File.h"
 
 namespace turboq {
+namespace detail {
+
+/// Get default page size
+[[nodiscard]] auto getDefaultPageSize() noexcept -> std::size_t;
+
+} // namespace detail
 
 /// Memory source interface
 struct MemorySource {
@@ -21,8 +27,8 @@ struct MemorySource {
 
     /// Get file descriptor for mapping and page size to round up
     /// \param[in] name is memory source name
-    [[nodiscard]] virtual auto open(std::string_view name, OpenFlags flags) const noexcept
-        -> std::expected<std::tuple<File, std::size_t>, std::error_code> = 0;
+    [[nodiscard]] virtual auto open(std::string_view name,
+        OpenFlags flags) const noexcept -> std::expected<std::tuple<File, std::size_t>, std::error_code> = 0;
 };
 
 /// HugePages option selector
@@ -42,7 +48,8 @@ public:
 
     /// Construct memory source explicit
     /// Throws on error
-    DefaultMemorySource(std::filesystem::path const& path, std::size_t pageSize);
+    explicit DefaultMemorySource(
+        std::filesystem::path const& path, std::size_t pageSize = detail::getDefaultPageSize());
 
     /// Path where shared files will be created
     [[nodiscard]] auto path() const noexcept -> std::filesystem::path const& {
@@ -50,15 +57,15 @@ public:
     }
 
     /// \see MemorySource::open
-    [[nodiscard]] auto open(std::string_view name, OpenFlags flags) const noexcept
-        -> std::expected<std::tuple<File, std::size_t>, std::error_code> override;
+    [[nodiscard]] auto open(std::string_view name,
+        OpenFlags flags) const noexcept -> std::expected<std::tuple<File, std::size_t>, std::error_code> override;
 };
 
 /// Anonymous memory source
 struct AnonymousMemorySource final : public MemorySource {
     /// \see MemorySource::open
-    [[nodiscard]] auto open(std::string_view name, OpenFlags flags) const noexcept
-        -> std::expected<std::tuple<File, std::size_t>, std::error_code> override;
+    [[nodiscard]] auto open(std::string_view name,
+        OpenFlags flags) const noexcept -> std::expected<std::tuple<File, std::size_t>, std::error_code> override;
 };
 
 } // namespace turboq

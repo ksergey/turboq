@@ -101,7 +101,7 @@ TEST_SUITE("MPSC") {
         REQUIRE_THROWS_AS((void)producer.prepare(4096), std::system_error);
     }
 
-    TEST_CASE("a second consumer is rejected while the first is alive") {
+    TEST_CASE_FIXTURE(MemorySourceFixture, "a second consumer is rejected while the first is alive") {
         auto source = makeTempMemorySource();
 
         auto created = MPSCMessageQueue::makeQueue(
