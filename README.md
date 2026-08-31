@@ -3,6 +3,7 @@
 [![C++](https://img.shields.io/badge/C++-23-blue.svg)](https://isocpp.org/)
 [![License](https://img.shields.io/github/license/ksergey/turboq)](LICENSE)
 [![CMake](https://img.shields.io/badge/build-CMake-informational.svg)](https://cmake.org)
+[![CI](https://github.com/ksergey/turboq/actions/workflows/build-and-test.yml/badge.svg)](https://github.com/ksergey/turboq/actions/workflows/build-and-test.yml)
 
 **High-performance, low-latency message queue library in C++**
 
