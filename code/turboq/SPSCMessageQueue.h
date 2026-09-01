@@ -181,8 +181,10 @@ public:
     }
 
     /// \overload
+    /// Precondition: \c size <= the \c size passed to the matching prepare(). Passing a \c size larger than
+    /// was reserved is UB -- the returned buffer was only sized for the prepare() value, so the
+    /// consumer would read past it.
     TURBOQ_FORCE_INLINE void commit(std::size_t size) noexcept {
-        // TODO: new size could be greater previous but less than lastMessageHeader_->size
         if (size <= lastMessageHeader_->payloadSize) [[likely]] {
             lastMessageHeader_->payloadSize = size;
         } else {

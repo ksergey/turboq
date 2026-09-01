@@ -139,8 +139,8 @@ public:
         }
 
         while (!std::atomic_ref(header_->producerPos)
-                    .compare_exchange_weak(currentProducerPos, currentProducerPos + 1, std::memory_order_release,
-                        std::memory_order_relaxed)) [[unlikely]] {
+                .compare_exchange_weak(currentProducerPos, currentProducerPos + 1, std::memory_order_release,
+                    std::memory_order_relaxed)) [[unlikely]] {
             if (currentProducerPos - consumerPosCache_ >= header_->length) [[unlikely]] {
                 return {};
             }
@@ -162,6 +162,9 @@ public:
     }
 
     /// \overload
+    /// Precondition: \c size <= the \c size passed to the matching prepare(). Passing a \c size larger than
+    /// was reserved is UB -- the returned buffer was only sized for the prepare() value, so the
+    /// consumer would read past it.
     TURBOQ_FORCE_INLINE void commit(std::size_t size) noexcept {
         auto const slotPtr = slots_.data() + producerPosCache_ * Details::kSlotHeaderBufferSize;
         auto const slotHeaderPtr = std::bit_cast<SlotHeader*>(slotPtr);
@@ -459,8 +462,8 @@ public:
     }
 
     template <typename... Args>
-    [[nodiscard]] static auto makeQueue(
-        Args&&... args) noexcept -> std::expected<MPSCMessageQueueImpl<Options>, std::error_code> {
+    [[nodiscard]] static auto makeQueue(Args&&... args) noexcept
+        -> std::expected<MPSCMessageQueueImpl<Options>, std::error_code> {
         try {
             return {MPSCMessageQueueImpl{std::forward<Args>(args)...}};
         } catch (std::system_error const& e) {
