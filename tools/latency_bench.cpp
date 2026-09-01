@@ -330,18 +330,18 @@ auto runConsumer(ConsumerT& consumer, Config const& cfg) -> bool {
     }
 
     std::printf("\n--- results ---\n");
-    std::printf("received       : %llu / %llu requested\n", static_cast<unsigned long long>(received),
+    std::printf("%-14s : %llu / %llu\n", "received", static_cast<unsigned long long>(received),
         static_cast<unsigned long long>(totalExpected));
-    std::printf("elapsed        : %.3f sec (%.0f msg/s)\n", elapsedSec,
+    std::printf("%-14s : %.3f sec (%.0f msg/s)\n", "elapsed", elapsedSec,
         elapsedSec > 0 ? static_cast<double>(received) / elapsedSec : 0.0);
+
+    std::printf("\n--- validity ---\n");
+    std::printf("%-14s : %s (missing=%llu, out-of-order/duplicate=%llu)\n", "sequence check",
+        allValid ? "OK" : "FAILED", static_cast<unsigned long long>(totalMissing),
+        static_cast<unsigned long long>(totalAnomalies));
     if constexpr (requires { consumer.overrunCount(); }) {
-        if (auto const overruns = consumer.overrunCount(); overruns != 0) {
-            std::printf("overruns       : %llu (consumer was lapped by the producer)\n",
-                static_cast<unsigned long long>(overruns));
-        }
+        std::printf("%-14s : %llu\n", "overruns", static_cast<unsigned long long>(consumer.overrunCount()));
     }
-    std::printf("sequence check : %s (missing=%llu, out-of-order/duplicate=%llu)\n", allValid ? "OK" : "FAILED",
-        static_cast<unsigned long long>(totalMissing), static_cast<unsigned long long>(totalAnomalies));
 
     bench::printReport(collector.makeReport());
 

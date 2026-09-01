@@ -216,23 +216,22 @@ inline void printReport(Report const& report) {
     if (report.received == 0) {
         return;
     }
-    std::printf("latency (ns):\n");
-    std::printf("  min    = %llu\n", static_cast<unsigned long long>(report.latencyMinNs));
-    std::printf("  mean   = %.1f\n", report.latencyMeanNs);
-    std::printf("  max    = %llu\n", static_cast<unsigned long long>(report.latencyMaxNs));
-    std::printf("  p50    = %llu\n", static_cast<unsigned long long>(report.p50));
-    std::printf("  p90    = %llu\n", static_cast<unsigned long long>(report.p90));
-    std::printf("  p99    = %llu\n", static_cast<unsigned long long>(report.p99));
-    std::printf("  p99.9  = %llu\n", static_cast<unsigned long long>(report.p999));
-    std::printf("  p99.99 = %llu\n", static_cast<unsigned long long>(report.p9999));
+    std::printf("\n--- latency (ns) ---\n");
+    std::printf("%-14s : %llu\n", "min", static_cast<unsigned long long>(report.latencyMinNs));
+    std::printf("%-14s : %.1f\n", "mean", report.latencyMeanNs);
+    std::printf("%-14s : %llu\n", "max", static_cast<unsigned long long>(report.latencyMaxNs));
+    std::printf("%-14s : %llu\n", "p50", static_cast<unsigned long long>(report.p50));
+    std::printf("%-14s : %llu\n", "p90", static_cast<unsigned long long>(report.p90));
+    std::printf("%-14s : %llu\n", "p99", static_cast<unsigned long long>(report.p99));
+    std::printf("%-14s : %llu\n", "p99.9", static_cast<unsigned long long>(report.p999));
+    std::printf("%-14s : %llu\n", "p99.99", static_cast<unsigned long long>(report.p9999));
 }
 
 /// Validates that message sequence numbers arrive strictly increasing, with no gaps (dropped
 /// messages) and no reordering/duplicates. Correct for any single-producer stream (SPSC, or one
 /// Multicast producer fanned out to independent consumers) -- each consumer sees a totally
-/// ordered stream. NOT valid for a merged multi-producer stream (see CoverageValidator below):
-/// with several producers racing, the embedded per-message seq values arrive in reservation
-/// order, not in numeric order.
+/// ordered stream. NOT valid for a merged multi-producer stream: with several producers racing,
+/// the embedded per-message seq values arrive in reservation order, not in numeric order.
 class SequenceValidator {
 private:
     std::uint64_t expected_{1};
@@ -285,56 +284,5 @@ public:
         return missing_ == 0 && outOfOrder_ == 0;
     }
 };
-
-/// Validates a merged stream from several concurrent producers, each tagged with a seq drawn from
-/// its own disjoint [base, base + count) range (see makeGlobalSeq() below). Order between
-/// producers is not defined -- only that every seq in [0, total) is delivered exactly once.
-class CoverageValidator {
-private:
-    std::vector<bool> seen_;
-    std::uint64_t duplicates_{0};
-    std::uint64_t outOfRange_{0};
-
-public:
-    explicit CoverageValidator(std::uint64_t total) : seen_(total, false) {}
-
-    void observe(std::uint64_t seq) {
-        if (seq >= seen_.size()) {
-            ++outOfRange_;
-            std::fprintf(stderr, "WARNING: seq=%llu out of expected range [0, %llu)\n",
-                static_cast<unsigned long long>(seq), static_cast<unsigned long long>(seen_.size()));
-            return;
-        }
-        if (seen_[seq]) {
-            ++duplicates_;
-            std::fprintf(stderr, "WARNING: duplicate delivery of seq=%llu\n", static_cast<unsigned long long>(seq));
-            return;
-        }
-        seen_[seq] = true;
-    }
-
-    [[nodiscard]] auto missing() const noexcept -> std::uint64_t {
-        return static_cast<std::uint64_t>(std::ranges::count(seen_, false));
-    }
-
-    [[nodiscard]] auto duplicates() const noexcept -> std::uint64_t {
-        return duplicates_;
-    }
-
-    [[nodiscard]] auto outOfRange() const noexcept -> std::uint64_t {
-        return outOfRange_;
-    }
-
-    [[nodiscard]] auto valid() const noexcept -> bool {
-        return missing() == 0 && duplicates_ == 0 && outOfRange_ == 0;
-    }
-};
-
-/// Combines a 0-based producer index with that producer's local message counter into the flat,
-/// globally-unique [0, producerCount * perProducerCount) range CoverageValidator expects.
-[[nodiscard]] constexpr auto makeGlobalSeq(
-    unsigned producerId, std::uint64_t localIndex, std::uint64_t perProducerCount) noexcept -> std::uint64_t {
-    return static_cast<std::uint64_t>(producerId) * perProducerCount + localIndex;
-}
 
 } // namespace bench
