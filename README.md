@@ -1,6 +1,7 @@
 # turboq
 
 [![C++](https://img.shields.io/badge/C++-23-blue.svg)](https://isocpp.org/)
+[![Platform](https://img.shields.io/badge/platform-Linux-orange)]()
 [![License](https://img.shields.io/github/license/ksergey/turboq)](LICENSE)
 [![CMake](https://img.shields.io/badge/build-CMake-informational.svg)](https://cmake.org)
 [![CI](https://github.com/ksergey/turboq/actions/workflows/build-and-test.yml/badge.svg)](https://github.com/ksergey/turboq/actions/workflows/build-and-test.yml)
@@ -13,7 +14,7 @@ TurboQ is a lightweight C++ library for building low-latency message queues, des
 
 - **Ultra-low latency** - nanosecond-range queue operations
 - **Lock-free algorithms** - maximum throughput with no locks
-- **Multiple queue types** - SPSC, MPSC, MPMC queues
+- **Multiple queue types** - Multicast, SPSC, MPSC queues
 - **Zero-copy operations** - minimal memory overhead
 
 ## Quick Start
