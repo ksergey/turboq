@@ -57,22 +57,22 @@ struct Config {
     Role role;
     QueueType type;
     std::string queueName;
-    std::size_t capacityBytes; // spsc / multicast
-    std::size_t lengthHint;    // mpsc ring length hint, in slots
-    std::size_t messageSize;
-    std::uint64_t count;               // producer: messages to send; consumer: messages to expect per producer
-    double rate;                       // producer only: messages per second (0 = unlimited)
-    unsigned producerId;               // producer only: this instance's slot in the global sequence range (mpsc)
-    unsigned producerCount;            // consumer only: how many distinct producer-id ranges to expect (mpsc)
-    std::uint64_t warmup;              // consumer only: messages excluded from latency stats (still validated)
-    std::uint64_t idleMs;              // consumer only
-    turboq::HugePagesOption hugePages; // where the queue's backing memory is allocated (see --hugepages);
-                                       // producer and consumer must agree on this, or they'll resolve to
-                                       // different mount points and the consumer won't find the queue
-    bool drain;                        // consumer only: drain queue before start
-    bool openOnly;                     // open an existing queue without creating/initializing it (either role)
-    bench::ClockSource clockSource;    // per-message timestamp source; must match between producer and
-                                       // consumer or the "latency" numbers are meaningless (see --clock)
+    std::optional<std::size_t> capacityHint; // spsc/multicast
+    std::optional<std::size_t> lengthHint;   // mpsc queue slots count hint
+    std::size_t slotSizeHint;                // mpsc queue slot size hint
+    std::uint64_t count;                     // producer: messages to send; consumer: messages to expect per producer
+    double rate;                             // producer only: messages per second (0 = unlimited)
+    unsigned producerId;                     // producer only: this instance's slot in the global sequence range (mpsc)
+    unsigned producerCount;                  // consumer only: how many distinct producer-id ranges to expect (mpsc)
+    std::uint64_t warmup;                    // consumer only: messages excluded from latency stats (still validated)
+    std::uint64_t idleMs;                    // consumer only
+    turboq::HugePagesOption hugePages;       // where the queue's backing memory is allocated (see --hugepages);
+                                             // producer and consumer must agree on this, or they'll resolve to
+                                             // different mount points and the consumer won't find the queue
+    bool drain;                              // consumer only: drain queue before start
+    bool openOnly;                           // open an existing queue without creating/initializing it (either role)
+    bench::ClockSource clockSource;          // per-message timestamp source; must match between producer and
+                                             // consumer or the "latency" numbers are meaningless (see --clock)
 };
 
 [[nodiscard]] auto parseClockSource(std::string const& value) -> bench::ClockSource {
@@ -170,12 +170,12 @@ void waitUntil(std::int64_t deadlineNs) noexcept {
 /// prepare()/commit() concept). seq numbers are 1-based and offset by producerId * count, so a
 /// consumer merging several mpsc producer processes can tell them apart (see --producer-id).
 template <typename ProducerT>
-void runProducer(ProducerT& producer, Config const& cfg) {
+void runProducer(ProducerT producer, Config const& cfg) {
     auto const intervalNs = cfg.rate > 0 ? static_cast<std::int64_t>(1e9 / cfg.rate) : 0;
     auto const seqBase = static_cast<std::uint64_t>(cfg.producerId) * cfg.count;
 
-    std::printf("producer: queue=%s message size=%llu bytes, count=%llu, rate=%s%s, clock=%s\n", cfg.queueName.c_str(),
-        static_cast<unsigned long long>(cfg.messageSize), static_cast<unsigned long long>(cfg.count),
+    std::printf("producer: queue=%s slot size=%llu bytes, count=%llu, rate=%s%s, clock=%s\n", cfg.queueName.c_str(),
+        static_cast<unsigned long long>(cfg.slotSizeHint), static_cast<unsigned long long>(cfg.count),
         cfg.rate > 0 ? (std::to_string(static_cast<long long>(cfg.rate)) + "/s").c_str() : "unlimited",
         cfg.producerId != 0 ? (" producer-id=" + std::to_string(cfg.producerId)).c_str() : "",
         cfg.clockSource == bench::ClockSource::Tsc ? "rdtsc" : "wall");
@@ -195,7 +195,7 @@ void runProducer(ProducerT& producer, Config const& cfg) {
 
         std::span<std::byte> buffer;
         for (;;) {
-            buffer = producer.prepare(cfg.messageSize);
+            buffer = producer.prepare(cfg.slotSizeHint);
             if (!buffer.empty()) {
                 break;
             }
@@ -236,7 +236,7 @@ void runProducer(ProducerT& producer, Config const& cfg) {
 /// gap/reorder/duplicate. For several mpsc producers (--producers > 1) delivery order between
 /// producers is unspecified by design, so each producer's own sub-range is validated separately.
 template <typename ConsumerT>
-auto runConsumer(ConsumerT& consumer, Config const& cfg) -> bool {
+auto runConsumer(ConsumerT consumer, Config const& cfg) -> bool {
     auto const totalExpected = static_cast<std::uint64_t>(cfg.producerCount) * cfg.count;
 
     std::printf("consumer: queue=%s expecting=%llu messages%s, idle timeout=%llu ms, clock=%s\n", cfg.queueName.c_str(),
@@ -352,56 +352,62 @@ auto runConsumer(ConsumerT& consumer, Config const& cfg) -> bool {
 auto runSPSC(Config const& cfg) -> int {
     auto memorySource = makeMemorySource(cfg);
 
-    auto queue = cfg.openOnly
-                     ? turboq::SPSCMessageQueue{cfg.queueName, memorySource}
-                     : turboq::SPSCMessageQueue{cfg.queueName,
-                           turboq::SPSCMessageQueue::CreationOptions{.capacityHint = cfg.capacityBytes}, memorySource};
+    auto queue = cfg.capacityHint
+                     ? turboq::SPSCMessageQueue{cfg.queueName,
+                           turboq::SPSCMessageQueue::CreationOptions{.capacityHint = *cfg.capacityHint * (1 << 20)},
+                           memorySource}
+                     : turboq::SPSCMessageQueue{cfg.queueName, memorySource};
 
     if (cfg.role == Role::Producer) {
-        auto producer = queue.createProducer();
-        runProducer(producer, cfg);
+        runProducer(queue.createProducer(), cfg);
         return EXIT_SUCCESS;
     }
+    if (cfg.role == Role::Consumer) {
+        return runConsumer(queue.createConsumer(), cfg) ? EXIT_SUCCESS : EXIT_FAILURE;
+    }
 
-    auto consumer = queue.createConsumer();
-    return runConsumer(consumer, cfg) ? EXIT_SUCCESS : EXIT_FAILURE;
+    std::unreachable();
 }
 
 auto runMPSC(Config const& cfg) -> int {
     auto memorySource = makeMemorySource(cfg);
 
-    auto queue = cfg.openOnly ? turboq::MPSCMessageQueue{cfg.queueName, memorySource}
-                              : turboq::MPSCMessageQueue{cfg.queueName,
-                                    turboq::MPSCMessageQueue::CreationOptions{
-                                        .slotSizeHint = cfg.messageSize, .lengthHint = cfg.lengthHint},
-                                    memorySource};
+    auto queue = cfg.lengthHint ? turboq::MPSCMessageQueue{cfg.queueName,
+                                      turboq::MPSCMessageQueue::CreationOptions{
+                                          .slotSizeHint = cfg.slotSizeHint, .lengthHint = *cfg.lengthHint},
+                                      memorySource}
+                                : turboq::MPSCMessageQueue{cfg.queueName, memorySource};
 
     if (cfg.role == Role::Producer) {
-        auto producer = queue.createProducer();
-        runProducer(producer, cfg);
+        runProducer(queue.createProducer(), cfg);
         return EXIT_SUCCESS;
     }
+    if (cfg.role == Role::Consumer) {
+        return runConsumer(queue.createConsumer(), cfg) ? EXIT_SUCCESS : EXIT_FAILURE;
+    }
 
-    auto consumer = queue.createConsumer();
-    return runConsumer(consumer, cfg) ? EXIT_SUCCESS : EXIT_FAILURE;
+    std::unreachable();
 }
 
 auto runMulticast(Config const& cfg) -> int {
     auto memorySource = makeMemorySource(cfg);
 
-    auto queue = cfg.openOnly ? turboq::MulticastMessageQueue{cfg.queueName, memorySource}
-                              : turboq::MulticastMessageQueue{cfg.queueName,
-                                    turboq::MulticastMessageQueue::CreationOptions{.capacityHint = cfg.capacityBytes},
-                                    memorySource};
+    auto queue =
+        cfg.capacityHint
+            ? turboq::MulticastMessageQueue{cfg.queueName,
+                  turboq::MulticastMessageQueue::CreationOptions{.capacityHint = *cfg.capacityHint * (1 << 20)},
+                  memorySource}
+            : turboq::MulticastMessageQueue{cfg.queueName, memorySource};
 
     if (cfg.role == Role::Producer) {
-        auto producer = queue.createProducer();
-        runProducer(producer, cfg);
+        runProducer(queue.createProducer(), cfg);
         return EXIT_SUCCESS;
     }
+    if (cfg.role == Role::Consumer) {
+        return runConsumer(queue.createConsumer(), cfg) ? EXIT_SUCCESS : EXIT_FAILURE;
+    }
 
-    auto consumer = queue.createConsumer();
-    return runConsumer(consumer, cfg) ? EXIT_SUCCESS : EXIT_FAILURE;
+    std::unreachable();
 }
 
 } // namespace
@@ -461,9 +467,13 @@ int main(int argc, char* argv[]) {
         cfg.role = parseRole(args["role"].as<std::string>());
         cfg.type = parseQueueType(args["type"].as<std::string>());
         cfg.queueName = args["name"].as<std::string>();
-        cfg.capacityBytes = args["capacity"].as<std::size_t>() * 1024ull * 1024ull;
-        cfg.lengthHint = args["length"].as<std::size_t>();
-        cfg.messageSize = args["size"].as<std::size_t>();
+        if (args.count("capacity")) {
+            cfg.capacityHint = args["capacity"].as<std::size_t>();
+        }
+        if (args.count("length")) {
+            cfg.lengthHint = args["length"].as<std::size_t>();
+        }
+        cfg.slotSizeHint = args["size"].as<std::size_t>();
         cfg.count = args["count"].as<std::uint64_t>();
         cfg.rate = args["rate"].as<double>();
         cfg.producerId = args["producer-id"].as<unsigned>();
@@ -477,8 +487,8 @@ int main(int argc, char* argv[]) {
         cfg.openOnly = (cfg.type == QueueType::MPSC) ? !args.count("length") : !args.count("capacity");
         cfg.clockSource = parseClockSource(args["clock"].as<std::string>());
 
-        if (cfg.messageSize < sizeof(bench::Message)) {
-            std::fprintf(stderr, "ERROR: --size must be >= %zu bytes (message header size)\n", sizeof(bench::Message));
+        if (cfg.slotSizeHint < sizeof(std::uint64_t)) {
+            std::fprintf(stderr, "ERROR: --size must be >= %zu bytes (std::uint64_t size)\n", sizeof(std::uint64_t));
             return EXIT_FAILURE;
         }
         if (cfg.count == 0) {
