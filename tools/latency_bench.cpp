@@ -70,7 +70,6 @@ struct Config {
                                              // producer and consumer must agree on this, or they'll resolve to
                                              // different mount points and the consumer won't find the queue
     bool drain;                              // consumer only: drain queue before start
-    bool openOnly;                           // open an existing queue without creating/initializing it (either role)
     bench::ClockSource clockSource;          // per-message timestamp source; must match between producer and
                                              // consumer or the "latency" numbers are meaningless (see --clock)
 };
@@ -482,9 +481,6 @@ int main(int argc, char* argv[]) {
         cfg.idleMs = args["idle"].as<std::uint64_t>();
         cfg.hugePages = parseHugePages(args["hugepages"].as<std::string>());
         cfg.drain = args.count("drain");
-        // Open-only when no queue-sizing argument was given explicitly: the queue must already
-        // exist. With size/capacity/length given, open-or-create (either role may initialize).
-        cfg.openOnly = (cfg.type == QueueType::MPSC) ? !args.count("length") : !args.count("capacity");
         cfg.clockSource = parseClockSource(args["clock"].as<std::string>());
 
         if (cfg.slotSizeHint < sizeof(std::uint64_t)) {

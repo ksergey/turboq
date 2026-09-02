@@ -1,4 +1,4 @@
-# turboq
+![image description](.github/logo.png)
 
 [![C++](https://img.shields.io/badge/C++-23-blue.svg)](https://isocpp.org/)
 [![Platform](https://img.shields.io/badge/platform-Linux-orange)]()
@@ -6,9 +6,7 @@
 [![CMake](https://img.shields.io/badge/build-CMake-informational.svg)](https://cmake.org)
 [![CI](https://github.com/ksergey/turboq/actions/workflows/build-and-test.yml/badge.svg)](https://github.com/ksergey/turboq/actions/workflows/build-and-test.yml)
 
-**High-performance, low-latency message queue library in C++**
-
-TurboQ is a lightweight C++ library for building low-latency message queues, designed for high-performance applications where every microsecond matters.
+> TurboQ is a lightweight C++ library for building low-latency message queues, designed for high-performance applications where every microsecond matters.
 
 ## Features
 
