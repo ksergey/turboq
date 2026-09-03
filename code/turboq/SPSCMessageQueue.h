@@ -60,9 +60,9 @@ struct SPSCMessageQueueLayout {
 template <typename Options>
 class SPSCMessageQueueProducerImpl {
 private:
-    using Details = SPSCMessageQueueLayout<Options>;
-    using MemoryHeader = typename Details::MemoryHeader;
-    using MessageHeader = typename Details::MessageHeader;
+    using Layout = SPSCMessageQueueLayout<Options>;
+    using MemoryHeader = typename Layout::MemoryHeader;
+    using MessageHeader = typename Layout::MessageHeader;
 
     MappedRegion storage_;
     std::span<std::byte> data_;
@@ -98,7 +98,7 @@ public:
 
         auto content = storage_.content();
         header_ = std::bit_cast<MemoryHeader*>(storage_.data());
-        data_ = content.subspan(Details::kMemoryHeaderBufferSize);
+        data_ = content.subspan(Layout::kMemoryHeaderBufferSize);
         producerPosCache_ = std::atomic_ref(header_->producerPos).load(std::memory_order_acquire);
 
         auto const consumerPos = std::atomic_ref(header_->consumerPos).load(std::memory_order_acquire);
@@ -107,7 +107,7 @@ public:
             minFreeSpace_ = consumerPos - producerPosCache_ - 1;
         } else {
             // Reserve space at end for last MessageHeader
-            minFreeSpace_ = data_.size() - producerPosCache_ - Details::kMessageHeaderBufferSize;
+            minFreeSpace_ = data_.size() - producerPosCache_ - Layout::kMessageHeaderBufferSize;
         }
     }
 
@@ -123,8 +123,8 @@ public:
 
     /// Reserve contiguous space for writing without making it visible to the consumers
     [[nodiscard]] TURBOQ_FORCE_INLINE auto prepare(std::size_t size) noexcept -> std::span<std::byte> {
-        auto const payloadBufferSize = Details::makeCacheLineAligned(size);
-        auto const messageBufferSize = Details::kMessageHeaderBufferSize + payloadBufferSize;
+        auto const payloadBufferSize = Layout::makeCacheLineAligned(size);
+        auto const messageBufferSize = Layout::kMessageHeaderBufferSize + payloadBufferSize;
 
         assert((messageBufferSize & (kCacheLineSize - 1)) == 0);
 
@@ -132,7 +132,7 @@ public:
             lastMessageHeader_ = std::bit_cast<MessageHeader*>(data_.data() + producerPosCache_);
             lastMessageHeader_->size = payloadBufferSize;
             lastMessageHeader_->payloadSize = size;
-            lastMessageHeader_->payloadOffset = producerPosCache_ + Details::kMessageHeaderBufferSize;
+            lastMessageHeader_->payloadOffset = producerPosCache_ + Layout::kMessageHeaderBufferSize;
             producerPosCache_ += messageBufferSize;
             minFreeSpace_ -= messageBufferSize;
 
@@ -146,14 +146,14 @@ public:
             minFreeSpace_ = consumerPosCache - producerPosCache_ - 1;
         } else {
             // producer has not lapsed consumer: space at end of buffer
-            minFreeSpace_ = data_.size() - producerPosCache_ - Details::kMessageHeaderBufferSize;
+            minFreeSpace_ = data_.size() - producerPosCache_ - Layout::kMessageHeaderBufferSize;
         }
 
         if (messageBufferSize <= minFreeSpace_) [[likely]] {
             lastMessageHeader_ = std::bit_cast<MessageHeader*>(data_.data() + producerPosCache_);
             lastMessageHeader_->size = payloadBufferSize;
             lastMessageHeader_->payloadSize = size;
-            lastMessageHeader_->payloadOffset = producerPosCache_ + Details::kMessageHeaderBufferSize;
+            lastMessageHeader_->payloadOffset = producerPosCache_ + Layout::kMessageHeaderBufferSize;
             producerPosCache_ += messageBufferSize;
             minFreeSpace_ -= messageBufferSize;
 
@@ -198,9 +198,9 @@ public:
 template <typename Options>
 class SPSCMessageQueueConsumerImpl {
 private:
-    using Details = SPSCMessageQueueLayout<Options>;
-    using MemoryHeader = typename Details::MemoryHeader;
-    using MessageHeader = typename Details::MessageHeader;
+    using Layout = SPSCMessageQueueLayout<Options>;
+    using MemoryHeader = typename Layout::MemoryHeader;
+    using MessageHeader = typename Layout::MessageHeader;
 
     MappedRegion storage_;
     std::span<std::byte> data_;
@@ -236,7 +236,7 @@ public:
 
         auto content = storage_.content();
         header_ = std::bit_cast<MemoryHeader*>(content.data());
-        data_ = content.subspan(Details::kMemoryHeaderBufferSize);
+        data_ = content.subspan(Layout::kMemoryHeaderBufferSize);
         consumerPosCache_ = std::atomic_ref(header_->consumerPos).load(std::memory_order_relaxed);
         producerPosCache_ = std::atomic_ref(header_->producerPos).load(std::memory_order_acquire);
 
@@ -315,9 +315,9 @@ public:
 template <typename Options>
 class SPSCMessageQueueImpl {
 private:
-    using Details = SPSCMessageQueueLayout<Options>;
-    using MemoryHeader = typename Details::MemoryHeader;
-    using MessageHeader = typename Details::MessageHeader;
+    using Layout = SPSCMessageQueueLayout<Options>;
+    using MemoryHeader = typename Layout::MemoryHeader;
+    using MessageHeader = typename Layout::MessageHeader;
 
     // Distinct bytes of the same fd, locked independently via File::tryLockRegion() (fcntl
     // F_OFD_SETLK) -- unlike flock() (whole-file only, one lock per fd) this lets producer and
@@ -409,13 +409,13 @@ public:
         if (fileSize == 0) {
             // init queue internals
             auto header = std::bit_cast<MemoryHeader*>(buffer.data());
-            std::ranges::copy(SPSCMessageQueueLayout<Options>::kTag, header->tag);
+            std::ranges::copy(Layout::kTag, header->tag);
             std::atomic_ref(header->producerPos).store(0, std::memory_order_relaxed);
             std::atomic_ref(header->consumerPos).store(0, std::memory_order_relaxed);
         }
 
         auto header = std::bit_cast<MemoryHeader const*>(buffer.data());
-        if (!std::ranges::equal(SPSCMessageQueueLayout<Options>::kTag, header->tag)) {
+        if (!std::ranges::equal(Layout::kTag, header->tag)) {
             throw std::system_error{makeErrorCode(Error::TagMismatch), "unexpected queue tag value"};
         }
 
@@ -435,7 +435,7 @@ public:
         if (!getFileSizeResult) {
             throw std::system_error{getFileSizeResult.error(), "failed to get queue file size"};
         }
-        if (getFileSizeResult.value() < Details::kMemoryHeaderBufferSize) {
+        if (getFileSizeResult.value() < Layout::kMemoryHeaderBufferSize) {
             // Too small to hold even the memory header: either the queue was never created, or (for
             // memory sources like AnonymousMemorySource, where "open only" cannot truly look up an
             // existing mapping by name) a fresh, empty backing file was handed to us instead. Reject
@@ -453,7 +453,7 @@ public:
         auto buffer = memory.content();
 
         auto header = std::bit_cast<MemoryHeader const*>(buffer.data());
-        if (!std::ranges::equal(SPSCMessageQueueLayout<Options>::kTag, header->tag)) {
+        if (!std::ranges::equal(Layout::kTag, header->tag)) {
             throw std::system_error{makeErrorCode(Error::TagMismatch), "unexpected queue tag value"};
         }
 

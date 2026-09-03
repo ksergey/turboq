@@ -80,9 +80,9 @@ struct MulticastMessageQueueLayout {
 template <typename Options>
 class MulticastMessageQueueProducerImpl {
 private:
-    using Details = MulticastMessageQueueLayout<Options>;
-    using MemoryHeader = typename Details::MemoryHeader;
-    using MessageHeader = typename Details::MessageHeader;
+    using Layout = MulticastMessageQueueLayout<Options>;
+    using MemoryHeader = typename Layout::MemoryHeader;
+    using MessageHeader = typename Layout::MessageHeader;
 
     MappedRegion storage_;
     std::span<std::byte> data_;
@@ -118,7 +118,7 @@ public:
 
         auto content = storage_.content();
         header_ = std::bit_cast<MemoryHeader*>(storage_.data());
-        data_ = content.subspan(Details::kMemoryHeaderBufferSize);
+        data_ = content.subspan(Layout::kMemoryHeaderBufferSize);
         producerPosCache_ = std::atomic_ref(header_->producerPos).load(std::memory_order_acquire);
     }
 
@@ -134,8 +134,8 @@ public:
 
     /// Reserve contiguous space for writing without making it visible to the consumers
     [[nodiscard]] TURBOQ_FORCE_INLINE auto prepare(std::size_t size) noexcept -> std::span<std::byte> {
-        auto const payloadBufferSize = Details::makeCacheLineAligned(size);
-        auto const messageBufferSize = Details::kMessageHeaderBufferSize + payloadBufferSize;
+        auto const payloadBufferSize = Layout::makeCacheLineAligned(size);
+        auto const messageBufferSize = Layout::kMessageHeaderBufferSize + payloadBufferSize;
 
         assert((messageBufferSize & (kCacheLineSize - 1)) == 0);
 
@@ -145,10 +145,10 @@ public:
         lastMessageHeader_->sequence = nextSequence_++;
 
         // check enough space for current message + additional aligned header
-        if (producerPosCache_ + messageBufferSize + Details::kMessageHeaderBufferSize > data_.size()) [[unlikely]] {
+        if (producerPosCache_ + messageBufferSize + Layout::kMessageHeaderBufferSize > data_.size()) [[unlikely]] {
             producerPosCache_ = 0;
         } else {
-            producerPosCache_ += Details::kMessageHeaderBufferSize;
+            producerPosCache_ += Layout::kMessageHeaderBufferSize;
         }
 
         lastMessageHeader_->payloadOffset = producerPosCache_;
@@ -181,9 +181,9 @@ public:
 template <typename Options>
 class MulticastMessageQueueConsumerImpl {
 private:
-    using Details = MulticastMessageQueueLayout<Options>;
-    using MemoryHeader = typename Details::MemoryHeader;
-    using MessageHeader = typename Details::MessageHeader;
+    using Layout = MulticastMessageQueueLayout<Options>;
+    using MemoryHeader = typename Layout::MemoryHeader;
+    using MessageHeader = typename Layout::MessageHeader;
 
     MappedRegion storage_;
     std::span<std::byte> data_;
@@ -227,7 +227,7 @@ public:
 
         auto content = storage_.content();
         header_ = std::bit_cast<MemoryHeader*>(content.data());
-        data_ = content.subspan(Details::kMemoryHeaderBufferSize);
+        data_ = content.subspan(Layout::kMemoryHeaderBufferSize);
         consumerPosCache_ = std::atomic_ref(header_->producerPos).load(std::memory_order_relaxed);
         producerPosCache_ = consumerPosCache_;
 
@@ -341,9 +341,9 @@ public:
 template <typename Options>
 class MulticastMessageQueueImpl {
 private:
-    using Details = MulticastMessageQueueLayout<Options>;
-    using MemoryHeader = typename Details::MemoryHeader;
-    using MessageHeader = typename Details::MessageHeader;
+    using Layout = MulticastMessageQueueLayout<Options>;
+    using MemoryHeader = typename Layout::MemoryHeader;
+    using MessageHeader = typename Layout::MessageHeader;
 
     File file_;
 
@@ -418,12 +418,12 @@ public:
         if (fileSize == 0) {
             // init queue internals
             auto header = std::bit_cast<MemoryHeader*>(buffer.data());
-            std::ranges::copy(MulticastMessageQueueLayout<Options>::kTag, header->tag);
+            std::ranges::copy(Layout::kTag, header->tag);
             std::atomic_ref(header->producerPos).store(0, std::memory_order_relaxed);
         }
 
         auto header = std::bit_cast<MemoryHeader const*>(buffer.data());
-        if (!std::ranges::equal(MulticastMessageQueueLayout<Options>::kTag, header->tag)) {
+        if (!std::ranges::equal(Layout::kTag, header->tag)) {
             throw std::system_error{makeErrorCode(Error::TagMismatch), "unexpected queue tag value"};
         }
 
@@ -443,7 +443,7 @@ public:
         if (!getFileSizeResult) {
             throw std::system_error{getFileSizeResult.error(), "failed to get queue file size"};
         }
-        if (getFileSizeResult.value() < Details::kMemoryHeaderBufferSize) {
+        if (getFileSizeResult.value() < Layout::kMemoryHeaderBufferSize) {
             throw std::system_error{makeErrorCode(Error::BufferTooSmall), "queue file too small to be a valid queue"};
         }
 
@@ -456,7 +456,7 @@ public:
         auto buffer = memory.content();
 
         auto header = std::bit_cast<MemoryHeader const*>(buffer.data());
-        if (!std::ranges::equal(MulticastMessageQueueLayout<Options>::kTag, header->tag)) {
+        if (!std::ranges::equal(Layout::kTag, header->tag)) {
             throw std::system_error{makeErrorCode(Error::TagMismatch), "unexpected queue tag value"};
         }
 

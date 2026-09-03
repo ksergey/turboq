@@ -19,8 +19,23 @@
 
 ### Dependencies
 
-- C++23 compiler
+- C++23 compiler (CI covers GCC 14+ and Clang 20+)
 - CMake 3.24+
+
+The rest is fetched automatically at configure time via [CPM.cmake](https://github.com/cpm-cmake/CPM.cmake) -- nothing else to install by hand, but the *first* `cmake` configure needs network access to pull these in:
+
+- [doctest](https://github.com/doctest/doctest) -- builds and runs the unit tests (`code/turboq/*_test.cpp`)
+- [cxxopts](https://github.com/jarro2783/cxxopts) -- command-line parsing for `tools/latency_bench`
+
+CPM itself is bootstrapped by `cmake/GetCPM.cmake`, which downloads a small `.cmake` script from
+GitHub on first configure and caches it in the build directory (or under `$CPM_SOURCE_CACHE`, if
+you've set that env var -- worth doing if you build from scratch often or want reproducible offline
+builds). No system-wide install step is needed for any of the above.
+
+> **Note:** `code/CMakeLists.txt` also wires up a `benchmark::benchmark_main` target for any
+> `*_bm.cpp` file that shows up under `code/turboq/`, but nothing in the CMake files currently
+> `CPMAddPackage`s Google Benchmark -- harmless today (no such files exist yet), but adding one
+> will fail to configure until that package is added alongside doctest/cxxopts above.
 
 ### Integration
 

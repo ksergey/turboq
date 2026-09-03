@@ -60,9 +60,9 @@ struct MPSCMessageQueueLayout {
 template <typename Options>
 class MPSCMessageQueueProducerImpl {
 private:
-    using Details = MPSCMessageQueueLayout<Options>;
-    using MemoryHeader = typename Details::MemoryHeader;
-    using SlotHeader = typename Details::SlotHeader;
+    using Layout = MPSCMessageQueueLayout<Options>;
+    using MemoryHeader = typename Layout::MemoryHeader;
+    using SlotHeader = typename Layout::SlotHeader;
 
     MappedRegion storage_;
     std::span<std::byte> data_;
@@ -99,11 +99,11 @@ public:
         auto content = storage_.content();
         header_ = std::bit_cast<MemoryHeader*>(storage_.data());
 
-        std::size_t offset = Details::kMemoryHeaderBufferSize;
+        std::size_t offset = Layout::kMemoryHeaderBufferSize;
         data_ = content.subspan(offset, header_->slotSize * header_->length);
 
         offset += header_->slotSize * header_->length;
-        slots_ = {content.data() + offset, header_->length * Details::kSlotHeaderBufferSize};
+        slots_ = {content.data() + offset, header_->length * Layout::kSlotHeaderBufferSize};
 
         consumerPosCache_ = std::atomic_ref(header_->consumerPos).load(std::memory_order_acquire);
     }
@@ -149,7 +149,7 @@ public:
 
         producerPosCache_ = currentProducerPos & (header_->length - 1);
         auto const dataPtr = data_.data() + producerPosCache_ * header_->slotSize;
-        auto const slotPtr = slots_.data() + producerPosCache_ * Details::kSlotHeaderBufferSize;
+        auto const slotPtr = slots_.data() + producerPosCache_ * Layout::kSlotHeaderBufferSize;
         std::bit_cast<SlotHeader*>(slotPtr)->payloadSize = size;
 
         return {dataPtr, size};
@@ -157,7 +157,7 @@ public:
 
     /// Make reserved buffer visible for consumers
     TURBOQ_FORCE_INLINE void commit() noexcept {
-        auto const slotPtr = slots_.data() + producerPosCache_ * Details::kSlotHeaderBufferSize;
+        auto const slotPtr = slots_.data() + producerPosCache_ * Layout::kSlotHeaderBufferSize;
         std::atomic_ref(std::bit_cast<SlotHeader*>(slotPtr)->committed).store(true, std::memory_order_release);
     }
 
@@ -166,7 +166,7 @@ public:
     /// was reserved is UB -- the returned buffer was only sized for the prepare() value, so the
     /// consumer would read past it.
     TURBOQ_FORCE_INLINE void commit(std::size_t size) noexcept {
-        auto const slotPtr = slots_.data() + producerPosCache_ * Details::kSlotHeaderBufferSize;
+        auto const slotPtr = slots_.data() + producerPosCache_ * Layout::kSlotHeaderBufferSize;
         auto const slotHeaderPtr = std::bit_cast<SlotHeader*>(slotPtr);
         if (size <= slotHeaderPtr->payloadSize) {
             slotHeaderPtr->payloadSize = size;
@@ -181,9 +181,9 @@ public:
 template <typename Options>
 class MPSCMessageQueueConsumerImpl {
 private:
-    using Details = MPSCMessageQueueLayout<Options>;
-    using MemoryHeader = typename Details::MemoryHeader;
-    using SlotHeader = typename Details::SlotHeader;
+    using Layout = MPSCMessageQueueLayout<Options>;
+    using MemoryHeader = typename Layout::MemoryHeader;
+    using SlotHeader = typename Layout::SlotHeader;
 
     MappedRegion storage_;
     std::span<std::byte> data_;
@@ -222,11 +222,11 @@ public:
         auto content = storage_.content();
         header_ = std::bit_cast<MemoryHeader*>(storage_.data());
 
-        std::size_t offset = Details::kMemoryHeaderBufferSize;
+        std::size_t offset = Layout::kMemoryHeaderBufferSize;
         data_ = content.subspan(offset, header_->slotSize * header_->length);
 
         offset += header_->slotSize * header_->length;
-        slots_ = {content.data() + offset, header_->length * Details::kSlotHeaderBufferSize};
+        slots_ = {content.data() + offset, header_->length * Layout::kSlotHeaderBufferSize};
 
         producerPosCache_ = std::atomic_ref(header_->producerPos).load(std::memory_order_acquire);
         consumerPosCache_ = std::atomic_ref(header_->consumerPos).load(std::memory_order_acquire);
@@ -260,7 +260,7 @@ public:
 
         auto const consumerPos = consumerPosCache_ & (header_->length - 1);
 
-        auto const slotPtr = slots_.data() + consumerPos * Details::kSlotHeaderBufferSize;
+        auto const slotPtr = slots_.data() + consumerPos * Layout::kSlotHeaderBufferSize;
         lastSlotHeader_ = std::bit_cast<SlotHeader*>(slotPtr);
         assert((reinterpret_cast<uintptr_t>(lastSlotHeader_) & (kCacheLineSize - 1)) == 0);
 
@@ -287,7 +287,7 @@ public:
         while (consumerPosCache_ != producerPosCache_) {
             // Drop message
             std::size_t const consumerPos = consumerPosCache_ & (header_->length - 1);
-            auto const slotPtr = slots_.data() + consumerPos * Details::kSlotHeaderBufferSize;
+            auto const slotPtr = slots_.data() + consumerPos * Layout::kSlotHeaderBufferSize;
             lastSlotHeader_ = std::bit_cast<SlotHeader*>(slotPtr);
             std::atomic_ref(lastSlotHeader_->committed).store(false, std::memory_order_release);
             consumerPosCache_++;
@@ -298,35 +298,33 @@ public:
 
 /// Memory layout:
 ///
-///    MemoryHeader                      data_ (length fixed-size slots)                commitStates_
-///   +------------------------+----------+----------+----------+     +----------+----+----+-----+-----+
-///   | tag | slotSize | length| Slot 0   | Slot 1   | Slot 2   | ... | Slot N-1 |  SlotHeader[0..N-1] |
-///   | consumerPos|producerPos|          |          |          |     |          |  (1 cache line each)|
-///   +------------------------+----------+----------+----------+     +----------+----+----+-----+-----+
+///    MemoryHeader                    data_ (length fixed-size slots, payload only)            slots_
+///   +------------------------+----------+----------+----------+     +----------+----+----+-----------+
+///   | tag | slotSize | length| Slot 0   | Slot 1   | Slot 2   | ... | Slot N-1 | SlotHeader[0..N-1]   |
+///   | consumerPos|producerPos|(payload) |(payload) |(payload) |     |(payload) | (1 cache line each)  |
+///   +------------------------+----------+----------+----------+     +----------+----+----+-----------+
 ///
 /// Unlike SPSC/MulticastQueue, this is a *fixed-size circular array* of `length` slots (always a
 /// power of two), not a variable-size byte ring: slot index = producerPos & (length - 1), so a
 /// given slot always lives at the same byte offset no matter how many times the ring has wrapped.
-/// Each slot is laid out as:
+/// Each slot in data_ holds nothing but the raw payload (up to slotSize bytes) -- unlike SPSC/
+/// MulticastQueue there's no per-slot header stored inline with the data.
 ///
-///   +--------+-------------------------------------------------+
-///   | Header | Payload (up to slotSize - sizeof(Header) bytes) |
-///   +--------+-------------------------------------------------+
-///
-/// commitStates_ is a *separate* array living after all the slots, one SlotHeader per slot, each
-/// padded out to its own cache line. A producer reserves a slot via compare_exchange on
-/// producerPos, writes the message into it, then flips commitStates_[slot].committed = true --
-/// kept apart from the slot data so a consumer can poll "is slot N ready yet?" without touching
-/// (and dirtying the cache line of) the payload itself. Keeping reservation (producerPos) and
-/// publication (committed) as two separate steps is also what lets several producers write to
-/// different slots concurrently: each one only ever owns the exact slot it CAS'd for.
+/// slots_ is a *separate* array living after all the data slots, one SlotHeader (a `committed` flag
+/// plus the `payloadSize`) per slot, each padded out to its own cache line. A producer reserves a
+/// slot via compare_exchange on producerPos, writes the payload into data_[slot], records its size
+/// in slots_[slot].payloadSize, then flips slots_[slot].committed = true -- kept apart from the
+/// payload so a consumer can poll "is slot N ready yet?" without touching (and dirtying the cache
+/// line of) the payload itself. Keeping reservation (producerPos) and publication (committed) as
+/// two separate steps is also what lets several producers write to different slots concurrently:
+/// each one only ever owns the exact slot it CAS'd for.
 
 template <typename Options>
 class MPSCMessageQueueImpl {
 private:
-    using Details = MPSCMessageQueueLayout<Options>;
-    using MemoryHeader = typename Details::MemoryHeader;
-    using SlotHeader = typename Details::SlotHeader;
+    using Layout = MPSCMessageQueueLayout<Options>;
+    using MemoryHeader = typename Layout::MemoryHeader;
+    using SlotHeader = typename Layout::SlotHeader;
 
     File file_;
 
@@ -382,10 +380,10 @@ public:
         auto const fileSize = getFileSizeResult.value();
 
         // calculate slot exactly size
-        auto const slotSize = Details::makeCacheLineAligned(options.slotSizeHint);
+        auto const slotSize = Layout::makeCacheLineAligned(options.slotSizeHint);
         auto const length = upperPow2(options.lengthHint);
         auto const capacityHint =
-            Details::kMemoryHeaderBufferSize + slotSize * length + Details::kSlotHeaderBufferSize * length;
+            Layout::kMemoryHeaderBufferSize + slotSize * length + Layout::kSlotHeaderBufferSize * length;
         // round-up requested size to page size
         auto const capacity = alignUp(capacityHint, pageSize);
 
@@ -411,7 +409,7 @@ public:
         if (fileSize == 0) {
             // init queue internals
             auto header = std::bit_cast<MemoryHeader*>(buffer.data());
-            std::ranges::copy(MPSCMessageQueueLayout<Options>::kTag, header->tag);
+            std::ranges::copy(Layout::kTag, header->tag);
             header->slotSize = slotSize;
             header->length = length;
             std::atomic_ref(header->producerPos).store(0, std::memory_order_relaxed);
@@ -421,7 +419,7 @@ public:
         }
 
         auto header = std::bit_cast<MemoryHeader const*>(buffer.data());
-        if (!std::ranges::equal(MPSCMessageQueueLayout<Options>::kTag, header->tag)) {
+        if (!std::ranges::equal(Layout::kTag, header->tag)) {
             throw std::system_error{makeErrorCode(Error::TagMismatch), "unexpected queue tag value"};
         }
 
@@ -441,7 +439,7 @@ public:
         if (!getFileSizeResult) {
             throw std::system_error{getFileSizeResult.error(), "failed to get queue file size"};
         }
-        if (getFileSizeResult.value() < Details::kMemoryHeaderBufferSize) {
+        if (getFileSizeResult.value() < Layout::kMemoryHeaderBufferSize) {
             throw std::system_error{makeErrorCode(Error::BufferTooSmall), "queue file too small to be a valid queue"};
         }
 
@@ -454,7 +452,7 @@ public:
         auto buffer = memory.content();
 
         auto header = std::bit_cast<MemoryHeader const*>(buffer.data());
-        if (!std::ranges::equal(MPSCMessageQueueLayout<Options>::kTag, header->tag)) {
+        if (!std::ranges::equal(Layout::kTag, header->tag)) {
             throw std::system_error{makeErrorCode(Error::TagMismatch), "unexpected queue tag value"};
         }
 
