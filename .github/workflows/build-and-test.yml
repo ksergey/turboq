@@ -320,3 +320,102 @@ jobs:
           if (NOT result EQUAL 0)
             message(FATAL_ERROR "Running tests failed!")
           endif()
+
+  python-bindings:
+    name: python bindings
+    runs-on: ubuntu-24.04
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: download ninja and cmake
+        id: cmake_and_ninja
+        shell: cmake -P {0}
+        run: |
+          set(cmake_version $ENV{CMAKE_VERSION})
+          set(ninja_version $ENV{NINJA_VERSION})
+
+          set(ninja_suffix "linux.zip")
+          set(cmake_suffix "linux-x86_64.tar.gz")
+          set(cmake_dir "cmake-${cmake_version}-linux-x86_64/bin")
+
+          set(ninja_url "https://github.com/ninja-build/ninja/releases/download/v${ninja_version}/ninja-${ninja_suffix}")
+          file(DOWNLOAD "${ninja_url}" ./ninja.zip SHOW_PROGRESS)
+          execute_process(COMMAND ${CMAKE_COMMAND} -E tar xvf ./ninja.zip)
+
+          set(cmake_url "https://github.com/Kitware/CMake/releases/download/v${cmake_version}/cmake-${cmake_version}-${cmake_suffix}")
+          file(DOWNLOAD "${cmake_url}" ./cmake.zip SHOW_PROGRESS)
+          execute_process(COMMAND ${CMAKE_COMMAND} -E tar xvf ./cmake.zip)
+
+          file(TO_CMAKE_PATH "$ENV{GITHUB_WORKSPACE}/${cmake_dir}" cmake_dir)
+          file(APPEND $ENV{GITHUB_OUTPUT} "cmake_dir=${cmake_dir}")
+
+          execute_process(
+            COMMAND chmod +x ninja
+            COMMAND chmod +x ${cmake_dir}/cmake
+          )
+
+      - name: install gcc-14 and python dev headers
+        shell: bash
+        run: |
+          sudo add-apt-repository ppa:ubuntu-toolchain-r/test -y
+          sudo apt update
+          sudo apt install -y g++-14 gcc-14 python3-dev
+          echo "CC=gcc-14" >> $GITHUB_ENV
+          echo "CXX=g++-14" >> $GITHUB_ENV
+
+      - name: install pytest
+        shell: bash
+        run: python3 -m pip install --break-system-packages pytest
+
+      - name: configure
+        shell: cmake -P {0}
+        run: |
+          set(ENV{PATH} "$ENV{GITHUB_WORKSPACE}:$ENV{PATH}")
+
+          execute_process(
+            COMMAND ${{ steps.cmake_and_ninja.outputs.cmake_dir }}/cmake
+              -S .
+              -B build
+              -G Ninja
+              -DCMAKE_MAKE_PROGRAM=ninja
+              -DCMAKE_C_COMPILER=${{ env.CC }}
+              -DCMAKE_CXX_COMPILER=${{ env.CXX }}
+              -DCMAKE_VERBOSE_MAKEFILE=ON
+              -DCMAKE_BUILD_TYPE=Release
+              -Dturboq_PYTHON=ON
+            RESULT_VARIABLE result
+          )
+          if (NOT result EQUAL 0)
+            message(FATAL_ERROR "Bad exit status")
+          endif()
+
+      - name: build
+        shell: cmake -P {0}
+        continue-on-error: false
+        run: |
+          set(ENV{NINJA_STATUS} "[%f/%t %o/sec] ")
+          set(ENV{PATH} "$ENV{GITHUB_WORKSPACE}:$ENV{PATH}")
+
+          execute_process(
+            COMMAND ${{ steps.cmake_and_ninja.outputs.cmake_dir }}/cmake --build build --target _turboq
+            RESULT_VARIABLE result
+          )
+          if (NOT result EQUAL 0)
+            message(FATAL_ERROR "Bad exit status")
+          endif()
+
+      - name: run python tests
+        shell: cmake -P {0}
+        continue-on-error: false
+        run: |
+          set(ENV{CTEST_OUTPUT_ON_FAILURE} "ON")
+
+          execute_process(
+            COMMAND ${{ steps.cmake_and_ninja.outputs.cmake_dir }}/ctest --verbose --test-dir python
+            WORKING_DIRECTORY build
+            RESULT_VARIABLE result
+          )
+          if (NOT result EQUAL 0)
+            message(FATAL_ERROR "Running python tests failed!")
+          endif()

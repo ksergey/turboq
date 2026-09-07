@@ -6,16 +6,12 @@ target_compile_features(${TargetName}
 set_target_properties(${TargetName}
     PROPERTIES
         CXX_STANDARD_REQUIRED ON
-        CXX_EXTENSIONS OFF)
+        CXX_EXTENSIONS OFF
+        POSITION_INDEPENDENT_CODE ON)
 target_compile_options(${TargetName}
     PUBLIC -Wall -Wextra -Wattributes -Wpedantic -Wstrict-aliasing -Wcast-align -g -fno-rtti)
 target_include_directories(${TargetName}
     PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
-
-if (TURBOQ_PYTHON)
-    set_property(TARGET ${TargetName}
-        PROPERTY POSITION_INDEPENDENT_CODE ON)
-endif()
 
 if (turboq_SANITIZER AND turboq_TSAN)
     message(FATAL_ERROR "turboq_SANITIZER (ASan/UBSan/LeakSanitizer) and turboq_TSAN (ThreadSanitizer) "
@@ -40,10 +36,12 @@ endif()
 file(GLOB_RECURSE Sources "${CMAKE_CURRENT_SOURCE_DIR}/turboq/*.cpp")
 file(GLOB_RECURSE Headers "${CMAKE_CURRENT_SOURCE_DIR}/turboq/*.h")
 
-TurboQAddTestsFromSourceList(Sources
-    PREFIX ${TargetName}
-    COMPILE_OPTIONS -Wall -Wextra -g
-    LIBS doctest::doctest_with_main ${TargetName})
+if (turboq_BUILD_TESTS)
+    TurboQAddTestsFromSourceList(Sources
+        PREFIX ${TargetName}
+        COMPILE_OPTIONS -Wall -Wextra -g
+        LIBS doctest::doctest_with_main ${TargetName})
+endif()
 
 TurboQAddBenchmarksFromSourceList(Sources
     PREFIX ${TargetName}

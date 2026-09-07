@@ -24,7 +24,7 @@
 
 The rest is fetched automatically at configure time via [CPM.cmake](https://github.com/cpm-cmake/CPM.cmake) -- nothing else to install by hand, but the *first* `cmake` configure needs network access to pull these in:
 
-- [doctest](https://github.com/doctest/doctest) -- builds and runs the unit tests (`code/turboq/*_test.cpp`)
+- [doctest](https://github.com/doctest/doctest) -- builds and runs the unit tests (`code/turboq/*_test.cpp`); skipped entirely when `-Dturboq_BUILD_TESTS=OFF` (see below)
 - [cxxopts](https://github.com/jarro2783/cxxopts) -- command-line parsing for `tools/latency_bench`
 
 CPM itself is bootstrapped by `cmake/GetCPM.cmake`, which downloads a small `.cmake` script from
@@ -32,31 +32,246 @@ GitHub on first configure and caches it in the build directory (or under `$CPM_S
 you've set that env var -- worth doing if you build from scratch often or want reproducible offline
 builds). No system-wide install step is needed for any of the above.
 
-> **Note:** `code/CMakeLists.txt` also wires up a `benchmark::benchmark_main` target for any
-> `*_bm.cpp` file that shows up under `code/turboq/`, but nothing in the CMake files currently
-> `CPMAddPackage`s Google Benchmark -- harmless today (no such files exist yet), but adding one
-> will fail to configure until that package is added alongside doctest/cxxopts above.
+### CMake options
+
+| Option | Default | Effect |
+|---|---|---|
+| `turboq_BUILD_TESTS` | `ON` | Build `*_test.cpp` files as doctest executables and register them with `ctest`; when `turboq_PYTHON` is also `ON`, additionally registers the `python/tests` pytest suite as a `ctest` test. Set to `OFF` to skip fetching doctest and building/registering any tests entirely (e.g. for a faster, dependency-light consumer build). |
+| `turboq_PYTHON` | `OFF` | Build the Python bindings under [`python/`](python/) (fetches pybind11 via CPM). |
+| `turboq_TOOLS` | `ON` | Build tools under [`tools/`](tools/) (fetches cxxopts via CPM). |
+
+```bash
+cmake -B build -Dturboq_BUILD_TESTS=OFF
+```
 
 ### Integration
 
-Add to `CMakeLists.txt`:
+Two equivalent ways to pull turboq into your own `CMakeLists.txt` -- pick whichever your project
+already uses. Both give you a `turboq::turboq` target; neither requires installing turboq
+system-wide first.
+
+**FetchContent** (built into CMake, no extra file needed):
 
 ```cmake
 include(FetchContent)
 FetchContent_Declare(
     turboq
     GIT_REPOSITORY https://github.com/ksergey/turboq.git
-    GIT_TAG main
+    GIT_TAG master
 )
 FetchContent_MakeAvailable(turboq)
 
 target_link_libraries(your_app PRIVATE turboq::turboq)
-
 ```
+
+**[CPM.cmake](https://github.com/cpm-cmake/CPM.cmake)** (what turboq uses internally for its own
+dependencies -- convenient if your project already has `cmake/CPM.cmake` vendored, since it adds
+caching across projects via `CPM_SOURCE_CACHE` and a terser one-line syntax):
+
+```cmake
+include(cmake/GetCPM.cmake)  # or wherever your project bootstraps CPM from
+CPMAddPackage("gh:ksergey/turboq#master")
+
+target_link_libraries(your_app PRIVATE turboq::turboq)
+```
+
+Either way, pin a commit or tag instead of `master` for a reproducible build once turboq has
+tagged releases; `master` here just tracks the latest commit.
+
+> **Note:** turboq's own `turboq_BUILD_TESTS` option (default `ON`) applies transitively -- as a
+> `FetchContent`/`CPM` dependency, building your project will also fetch doctest/cxxopts and build
+> turboq's own test suite unless you turn it off, e.g. `set(turboq_BUILD_TESTS OFF)` before
+> `FetchContent_MakeAvailable`/`CPMAddPackage`, or `-Dturboq_BUILD_TESTS=OFF` on the command line.
 
 ### Usage Examples
 
-TODO
+A minimal SPSC producer and consumer, two separate processes sharing a queue by name (`message-queue`
+here) -- MPSC and Multicast follow the same `prepare()`/`commit()`/`fetch()`/`consume()` shape, see
+[`tools/latency_bench.cpp`](tools/latency_bench.cpp) for a complete example of all three plus
+proper error handling:
+
+```cpp
+// producer.cpp -- creates the queue if it doesn't exist yet
+#include <cstring>
+#include <iostream>
+#include <string_view>
+
+#include <turboq/SPSCMessageQueue.h>
+
+int main() {
+    using namespace turboq;
+
+    auto result = SPSCMessageQueue::makeQueue("message-queue", SPSCMessageQueue::CreationOptions{.capacityHint = 1 << 20});
+    if (!result) {
+        std::cerr << "failed to create queue: " << result.error().message() << '\n';
+        return 1;
+    }
+
+    auto queue = std::move(result).value();
+    auto producer = queue.createProducer();
+
+    std::string_view message = "hello from the producer";
+    auto buffer = producer.prepare(message.size()); // reserve space, not yet visible to the consumer
+    std::memcpy(buffer.data(), message.data(), message.size());
+    producer.commit(); // make it visible
+
+    std::cout << "sent: " << message << '\n';
+}
+```
+
+```cpp
+// consumer.cpp -- opens an existing queue only, throws if it isn't there yet
+#include <iostream>
+
+#include <turboq/SPSCMessageQueue.h>
+
+int main() {
+    using namespace turboq;
+
+    auto result = SPSCMessageQueue::makeQueue("message-queue");
+    if (!result) {
+        std::cerr << "failed to open queue: " << result.error().message() << '\n';
+        return 1;
+    }
+
+    auto queue = std::move(result).value();
+    auto consumer = queue.createConsumer();
+
+    for (;;) {
+        auto buffer = consumer.fetch(); // never blocks; empty span means "nothing yet"
+        if (!buffer.empty()) {
+            std::cout << "received: "
+                       << std::string_view{reinterpret_cast<char const*>(buffer.data()), buffer.size()} << '\n';
+            consumer.consume();
+            break;
+        }
+    }
+}
+```
+
+A few things worth calling out:
+
+- `fetch()`/`prepare()` never block -- a real program polls in a loop (ideally with some backoff or
+  a rate limit if run continuously) rather than spinning as tightly as this toy example.
+- Omitting `MemorySource` (as above) uses turboq's own default location (`/dev/shm`, falling back
+  to `/tmp`); pass a `DefaultMemorySource{path}` explicitly to control where the backing file
+  lives, or `AnonymousMemorySource{}` for a same-process-only queue (handy for a quick unit test).
+- `SPSCMessageQueue::makeQueue(name)` (one argument, as in `consumer.cpp` above) opens an existing
+  queue only and fails if it isn't there yet; passing `CreationOptions` (as in `producer.cpp`)
+  creates the queue if missing or opens it if it already exists with a matching capacity.
+
+### Python bindings
+
+Optional pybind11-based bindings live under [`python/`](python/), covering all three queue types
+(SPSC, MPSC, Multicast) with a bytes-in/bytes-out API: `producer.send(data: bytes) -> bool` and
+`consumer.receive() -> bytes | None`. They're off by default; enable with `-Dturboq_PYTHON=ON`.
+pybind11 is fetched automatically via CPM, same as `doctest`/`cxxopts` above -- no
+`pip install pybind11` needed to configure the build.
+
+#### Integration
+
+The simplest option for a Python project: add a line to `requirements.txt` (or `pip install`
+directly) pointing at this branch's `python/` subdirectory. `python/pyproject.toml` wraps the
+CMake build with [scikit-build-core](https://scikit-build-core.readthedocs.io/), so pip drives the
+whole thing -- configure, build, and install the compiled extension -- same as any other package:
+
+```
+# requirements.txt
+git+https://github.com/ksergey/turboq.git@python#subdirectory=python
+```
+
+```bash
+CC=gcc-14 CXX=g++-14 pip install -r requirements.txt
+```
+
+`CC`/`CXX` still need to point at a C++23-capable compiler -- pip has no way to know that on its
+own, same as a manual CMake configure. Without them, pip falls back to whatever your system's
+default `cc`/`c++` is, which may well be older than GCC 14/Clang 20. If you'd rather not touch
+environment variables, pass the compiler directly to CMake instead:
+
+```bash
+pip install -r requirements.txt \
+    --config-settings=cmake.define.CMAKE_C_COMPILER=gcc-14 \
+    --config-settings=cmake.define.CMAKE_CXX_COMPILER=g++-14
+```
+
+Pin a commit instead of a branch (`@<sha>` instead of `@python`) for a reproducible build.
+
+Alternatively, build in-tree and point `PYTHONPATH` at the result -- good for trying things out
+without going through pip at all:
+
+```bash
+cmake -B build -Dturboq_PYTHON=ON -DCMAKE_C_COMPILER=gcc-14 -DCMAKE_CXX_COMPILER=g++-14
+cmake --build build --target _turboq
+PYTHONPATH=build/python python3 -c "import turboq; print(turboq.SPSCQueue)"
+```
+
+Or install it into a Python environment directly via CMake (equivalent to what the pip route above
+does under the hood, without pip in the loop):
+
+```bash
+cmake -B build -Dturboq_PYTHON=ON -Dturboq_BUILD_TESTS=OFF \
+    -DCMAKE_C_COMPILER=gcc-14 -DCMAKE_CXX_COMPILER=g++-14 \
+    -DCMAKE_INSTALL_PREFIX="$(python3 -c 'import site; print(site.getsitepackages()[0])')"
+cmake --build build --target _turboq
+cmake --install build --component turboq_python  # or just `cmake --install build`
+python3 -c "import turboq"
+```
+
+#### Usage example
+
+Sending and receiving a message, single process (SPSC, the simplest case -- MPSC and Multicast
+follow the same shape, see the docstrings/tests under [`python/`](python/) for their extras:
+multiple producers for MPSC, `overrun_count` for Multicast):
+
+```python
+import turboq
+
+queue = turboq.SPSCQueue("message-queue", capacity_hint=1 << 20, anonymous=True)
+producer = queue.create_producer()
+consumer = queue.create_consumer()
+
+if producer.send(b"hello"):
+    print("sent")
+
+message = consumer.receive()  # bytes, or None if the queue is currently empty
+if message is not None:
+    print("received:", message)
+```
+
+Real usage is normally two separate processes sharing a queue by name rather than `anonymous=True`
+in one process -- drop `anonymous` and give both sides the same `name` (and `path`, if you don't
+want turboq's own `/dev/shm`/`/tmp` default):
+
+```python
+# producer.py -- creates the queue if it doesn't exist yet
+import turboq
+
+queue = turboq.SPSCQueue("message-queue", capacity_hint=1 << 20, path="/dev/shm/myapp")
+producer = queue.create_producer()
+producer.send(b"hello from another process")
+```
+
+```python
+# consumer.py -- opens an existing queue only, raises if it isn't there yet
+import turboq
+
+queue = turboq.SPSCQueue.open("message-queue", path="/dev/shm/myapp")
+consumer = queue.create_consumer()
+print(consumer.receive())
+```
+
+A couple of things worth knowing:
+
+- `receive()` never blocks -- an empty queue and a zero-length message both come back as an empty
+  read at the C++ level, so `receive()` returns `None` for both; if you need to send a genuinely
+  empty event, prefix it with a sentinel byte rather than relying on payload length alone.
+- `SPSCQueue`/`MulticastQueue` enforce a single producer (an OS file lock rejects a second one);
+  `MPSCQueue` allows any number of producers. All three raise `RuntimeError` on misuse (bad
+  options, opening a queue that doesn't exist, a message too large for an MPSC slot, etc).
+
+See [`python/tests`](python/tests) for runnable examples of all three queue types, including MPSC's
+multiple producers and Multicast's broadcast-to-many-consumers/`overrun_count`.
 
 ## Benchmarking with `latency_bench`
 

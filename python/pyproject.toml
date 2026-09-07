@@ -1,0 +1,41 @@
+[build-system]
+# pybind11 itself is NOT listed here on purpose: it's fetched by CMake via CPM
+# (see ../CMakeLists.txt / CMakeLists.txt), the same as doctest/cxxopts
+# elsewhere in this project, so `pip install` needs no extra Python-side
+# build dependency for it.
+requires = ["scikit-build-core>=0.10"]
+build-backend = "scikit_build_core.build"
+
+[project]
+name = "turboq"
+version = "0.1.0"
+description = "Python bindings for turboq's SPSC/MPSC/Multicast low-latency message queues"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+classifiers = [
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: C++",
+]
+
+[tool.scikit-build]
+# This directory (python/) has no CMakeLists.txt of its own that stands alone --
+# it only defines the _turboq target, which depends on the turboq::turboq
+# target defined one level up. Point CMake at the repo root instead.
+cmake.source-dir = ".."
+
+# Same flags as building this project manually: enable the bindings, skip the
+# C++ doctest suite (and the pytest suite it would otherwise pull in via
+# ctest -- irrelevant to installing the package, and pytest isn't a build
+# dependency here).
+cmake.args = ["-Dturboq_PYTHON=ON", "-Dturboq_BUILD_TESTS=OFF"]
+
+# Only build the extension (and whatever it depends on, i.e. the turboq
+# static library) -- skip tools/latency_bench, which the default "all"
+# target would otherwise also build for no reason when just installing the
+# Python package.
+build.targets = ["_turboq"]
+
+# turboq/__init__.py + the compiled turboq/_turboq*.so (placed there by
+# python/CMakeLists.txt's install() rules) become the "turboq" package.
+wheel.packages = ["turboq"]
