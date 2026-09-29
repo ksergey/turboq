@@ -87,7 +87,6 @@ TEST_SUITE("MulticastMessageQueue") {
                 REQUIRE_EQ(msg.seq, seq);
             }
             REQUIRE_FALSE(dequeue(consumer, msg));
-            REQUIRE_EQ(consumer.overrunCount(), 0u);
         }
     }
 
@@ -189,49 +188,9 @@ TEST_SUITE("MulticastMessageQueue") {
         REQUIRE_EQ(msg.seq, 8);
     }
 
-    TEST_CASE("consumer detects being lapped by a fast producer (overrun)") {
-        // small capacity relative to the message size so the producer wraps around many times
-        // over a paused consumer's position
+    TEST_CASE("a fully-consumed stream across many wraps never triggers a false lap resync") {
         auto result = MulticastMessageQueue::makeQueue(
-            "overrun", MulticastMessageQueue::CreationOptions{.capacityHint = 4096}, AnonymousMemorySource{});
-        REQUIRE(result);
-
-        auto queue = std::move(result).value();
-        auto producer = queue.createProducer();
-        auto consumer = queue.createConsumer();
-        REQUIRE(producer);
-        REQUIRE(consumer);
-
-        // one full round-trip establishes a real sequence baseline in the consumer
-        REQUIRE(enqueue(producer, Message{.seq = 0}));
-        Message msg;
-        REQUIRE(dequeue(consumer, msg));
-        REQUIRE_EQ(msg.seq, 0);
-        REQUIRE_EQ(consumer.overrunCount(), 0u);
-
-        // let the producer lap the still-parked consumer many times over without it reading anything
-        for (std::uint64_t seq = 1; seq <= 500; ++seq) {
-            REQUIRE(enqueue(producer, Message{.seq = seq}));
-        }
-
-        // the slot the consumer is still parked at has long since been overwritten -- the very next
-        // fetch() must detect the discontinuity (via overrunCount()) rather than hand back a
-        // stale/out-of-context message. fetch() itself just reports empty either way -- same as
-        // "no data yet" -- overrunCount() is the only way to tell the two apart.
-        auto staleResult = consumer.fetch();
-        REQUIRE(staleResult.empty());
-        REQUIRE_EQ(consumer.overrunCount(), 1u);
-
-        // and it recovers: the queue is fully usable again from here, exactly like a fresh subscriber
-        REQUIRE(enqueue(producer, Message{.seq = 999}));
-        REQUIRE(dequeue(consumer, msg));
-        REQUIRE_EQ(msg.seq, 999);
-        REQUIRE_EQ(consumer.overrunCount(), 1u); // unchanged: no further overrun on the recovered stream
-    }
-
-    TEST_CASE("a fully-consumed stream across many wraps never reports a false overrun") {
-        auto result = MulticastMessageQueue::makeQueue(
-            "no-false-overrun", MulticastMessageQueue::CreationOptions{.capacityHint = 4096}, AnonymousMemorySource{});
+            "no-false-lap", MulticastMessageQueue::CreationOptions{.capacityHint = 4096}, AnonymousMemorySource{});
         REQUIRE(result);
 
         auto queue = std::move(result).value();
@@ -241,19 +200,18 @@ TEST_SUITE("MulticastMessageQueue") {
         REQUIRE(consumer);
 
         // 10000 messages through a ring that only fits ~32 at a time -- hundreds of wraps, all
-        // fully drained between writes, must never be mistaken for an overrun
+        // fully drained between writes, must never be mistaken for a lap (a false positive would
+        // resync the consumer and make the next dequeue() fail)
         for (std::uint64_t i = 0; i < 10000; ++i) {
             REQUIRE(enqueue(producer, Message{.seq = i}));
             Message msg;
             REQUIRE(dequeue(consumer, msg));
             REQUIRE_EQ(msg.seq, i);
         }
-
-        REQUIRE_EQ(consumer.overrunCount(), 0u);
     }
 
-    TEST_CASE("reset() after an overrun does not resurrect the stale sequence baseline") {
-        auto result = MulticastMessageQueue::makeQueue("overrun-then-reset",
+    TEST_CASE("reset() after being lapped does not resurrect the stale sequence baseline") {
+        auto result = MulticastMessageQueue::makeQueue("lapped-then-reset",
             MulticastMessageQueue::CreationOptions{.capacityHint = 4096}, AnonymousMemorySource{});
         REQUIRE(result);
 
@@ -278,7 +236,6 @@ TEST_SUITE("MulticastMessageQueue") {
         REQUIRE(enqueue(producer, Message{.seq = 501}));
         REQUIRE(dequeue(consumer, msg));
         REQUIRE_EQ(msg.seq, 501);
-        REQUIRE_EQ(consumer.overrunCount(), 0u);
     }
 }
 

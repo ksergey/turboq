@@ -159,6 +159,12 @@ A few things worth calling out:
 - `SPSCMessageQueue::makeQueue(name)` (one argument, as in `consumer.cpp` above) opens an existing
   queue only and fails if it isn't there yet; passing `CreationOptions` (as in `producer.cpp`)
   creates the queue if missing or opens it if it already exists with a matching capacity.
+- `MulticastMessageQueue` has no backpressure: the producer never waits for consumers and
+  overwrites data a slow consumer hasn't read yet. A consumer that falls more than a full ring
+  behind gets **unspecified results** -- it may silently skip messages or, rarely, receive a
+  garbage message; lap detection is best-effort only and there is no reliable way to observe that
+  it happened (debug builds assert on the worst case). Size the ring for the worst-case latency of
+  your slowest consumer, and put a sequence number in your own payload if you need to detect gaps.
 
 ### Python bindings
 
@@ -222,7 +228,7 @@ python3 -c "import turboq"
 
 Sending and receiving a message, single process (SPSC, the simplest case -- MPSC and Multicast
 follow the same shape, see the docstrings/tests under [`python/`](python/) for their extras:
-multiple producers for MPSC, `overrun_count` for Multicast):
+multiple producers for MPSC, broadcast to many consumers for Multicast):
 
 ```python
 import turboq
@@ -269,9 +275,12 @@ A couple of things worth knowing:
 - `SPSCQueue`/`MulticastQueue` enforce a single producer (an OS file lock rejects a second one);
   `MPSCQueue` allows any number of producers. All three raise `RuntimeError` on misuse (bad
   options, opening a queue that doesn't exist, a message too large for an MPSC slot, etc).
+- `MulticastQueue` never blocks the producer: a consumer that falls more than a full ring behind
+  gets unspecified results (skipped or garbage messages), with no reliable signal that it happened
+  -- see the C++ notes above.
 
 See [`python/tests`](python/tests) for runnable examples of all three queue types, including MPSC's
-multiple producers and Multicast's broadcast-to-many-consumers/`overrun_count`.
+multiple producers and Multicast's broadcast-to-many-consumers.
 
 ## Benchmarking with `latency_bench`
 

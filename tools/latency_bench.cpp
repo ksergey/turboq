@@ -339,9 +339,6 @@ auto runConsumer(ConsumerT consumer, Config const& cfg) -> bool {
     std::printf("%-14s : %s (missing=%llu, out-of-order/duplicate=%llu)\n", "sequence check",
         allValid ? "OK" : "FAILED", static_cast<unsigned long long>(totalMissing),
         static_cast<unsigned long long>(totalAnomalies));
-    if constexpr (requires { consumer.overrunCount(); }) {
-        std::printf("%-14s : %llu\n", "overruns", static_cast<unsigned long long>(consumer.overrunCount()));
-    }
 
     bench::printReport(collector.makeReport());
 

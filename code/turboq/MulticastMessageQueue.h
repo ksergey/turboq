@@ -34,26 +34,26 @@ struct MulticastMessageQueueLayout {
         std::size_t size; // aligned payload size
         std::size_t payloadOffset;
         std::size_t payloadSize;
-        // Monotonically increasing per-producer message counter, stamped in prepare(). A consumer
-        // that reads a sequence it didn't expect knows this slot has been overwritten one or more
-        // times since it last looked -- i.e. it has been lapped by the producer. This is the *only*
-        // signal used for overrun detection: there is no separate flow-control counter, by design
-        // (this queue intentionally has no backpressure -- a slow consumer must never be able to
-        // stall the producer or other consumers).
+        // Monotonically increasing per-producer message counter, stamped in prepare(). Used by the
+        // consumer for *best-effort* lap detection only: if the sequence it reads isn't the one it
+        // expected, the slot has been overwritten since it last looked, and fetch() resyncs to the
+        // producer's current position instead of returning it.
         //
-        // KNOWN LIMITATION: this only checks the sequence once, at fetch() time -- it is not a
-        // full seqlock (which would also re-check the sequence *after* the caller finishes reading
-        // the payload span fetch() returned, and retry if it changed). Between fetch() returning
-        // and the caller finishing that read, the producer could in principle wrap the entire ring
-        // and overwrite this exact slot again, and the caller would read a torn mix of the old and
-        // new message with no signal that it happened. Closing this fully means either copying the
-        // payload out inside the library and re-checking sequence before returning (gives up
-        // zero-copy), or pushing a second, post-read check onto the caller (see overrunCount() on
-        // the consumer). Not implemented for now: it requires the producer to lap the *entire*
-        // ring while a single fetch()'s payload is still being read by the caller, which in
-        // practice means the consumer is already badly behind -- at that point the fix is on the
-        // consumer side (keep up, or size the ring for your worst-case consumer latency), not a
-        // patch here. Revisit if that assumption stops holding.
+        // This is NOT a reliable overrun detector, and the queue gives no guarantees to a consumer
+        // that falls more than a full ring behind (there is no backpressure, by design -- a slow
+        // consumer must never be able to stall the producer or other consumers):
+        //
+        //  - Wrapping (see prepare()) shifts where headers land on each lap, so a lapped consumer's
+        //    position may point into the middle of a newer message's *payload* rather than at a
+        //    header. fetch() then interprets user bytes as a MessageHeader; if they happen to
+        //    contain the expected sequence (e.g. stale bytes left in payload padding), the lap goes
+        //    unnoticed and fetch() returns an arbitrary span.
+        //  - Even when the consumer is positioned at a real header, this only checks the sequence
+        //    once, at fetch() time -- it is not a full seqlock. The producer could overwrite the
+        //    slot again while the caller is still reading the returned payload (torn read).
+        //
+        // Size the ring for your worst-case consumer latency; a consumer that can't keep up gets
+        // undefined results, not an error.
         std::size_t sequence;
     };
 
@@ -192,10 +192,9 @@ private:
     std::size_t producerPosCache_{0};
     MessageHeader* lastMessageHeader_{nullptr};
     std::size_t expectedSequence_{0};  // meaningful only when haveExpectedSequence_ is true
-    bool haveExpectedSequence_{false}; // false right after construction/reset/an overrun: next
+    bool haveExpectedSequence_{false}; // false right after construction/reset/a detected lap: next
                                        // fetch() just baselines on whatever sequence it sees,
                                        // rather than comparing against a stale expectation
-    std::size_t overrunCount_{0};      // cumulative count of detected laps, since this consumer was created
 
 public:
     MulticastMessageQueueConsumerImpl() = default;
@@ -207,8 +206,7 @@ public:
           producerPosCache_{std::exchange(other.producerPosCache_, 0)},
           lastMessageHeader_{std::exchange(other.lastMessageHeader_, nullptr)},
           expectedSequence_{std::exchange(other.expectedSequence_, 0)},
-          haveExpectedSequence_{std::exchange(other.haveExpectedSequence_, false)},
-          overrunCount_{std::exchange(other.overrunCount_, 0)} {}
+          haveExpectedSequence_{std::exchange(other.haveExpectedSequence_, false)} {}
 
     MulticastMessageQueueConsumerImpl& operator=(MulticastMessageQueueConsumerImpl&& other) noexcept {
         if (this != &other) {
@@ -245,8 +243,11 @@ public:
     }
 
     /// Get next buffer for reading. Return empty buffer in case of no data -- including right
-    /// after an overrun was detected (see overrunCount()): the position has already been resynced
-    /// to the producer's current head, so the next call resumes normally from there.
+    /// after a lap by the producer was detected: the position has already been resynced to the
+    /// producer's current head, so the next call resumes normally from there.
+    ///
+    /// Lap detection is best-effort (see MessageHeader::sequence): if this consumer has fallen
+    /// more than a full ring behind the producer, the result is unspecified.
     [[nodiscard]] TURBOQ_FORCE_INLINE auto fetch() noexcept -> std::span<std::byte const> {
         if (producerPosCache_ == consumerPosCache_ &&
             (producerPosCache_ = std::atomic_ref(header_->producerPos).load(std::memory_order_acquire)) ==
@@ -267,12 +268,22 @@ public:
             // of a header that's actively being written. Either way, jump straight to the
             // producer's current position (same recovery as reset()) instead of trying to figure
             // out how many messages were lost or salvage anything from this slot.
-            ++overrunCount_;
             consumerPosCache_ = std::atomic_ref(header_->producerPos).load(std::memory_order_acquire);
             producerPosCache_ = consumerPosCache_;
             haveExpectedSequence_ = false;
             return {};
         }
+
+        // A header that passed the sequence check must describe a payload inside the ring. This can
+        // only fire if the consumer was lapped and its position now points into another message's
+        // payload whose bytes happened to match the expected sequence (see MessageHeader::sequence)
+        // -- i.e. the consumer fell more than a full ring behind. Not a runtime check: a consumer
+        // that slow is outside the queue's contract, and the fix is to keep up or size the ring
+        // for the worst-case consumer latency. In debug builds this turns a silent out-of-bounds
+        // span into an immediate failure.
+        assert(lastMessageHeader_->payloadOffset <= data_.size() &&
+               lastMessageHeader_->payloadSize <= lastMessageHeader_->size &&
+               lastMessageHeader_->size <= data_.size() - lastMessageHeader_->payloadOffset);
 
         expectedSequence_ = sequence + 1;
         return data_.subspan(lastMessageHeader_->payloadOffset, lastMessageHeader_->payloadSize);
@@ -286,14 +297,6 @@ public:
         assert((lastMessageHeader_->size & (kCacheLineSize - 1)) == 0);
 
         consumerPosCache_ = lastMessageHeader_->payloadOffset + lastMessageHeader_->size;
-    }
-
-    /// Cumulative number of times this consumer detected it had been lapped by the producer (see
-    /// fetch()), since it was created or last reset(). This is the only way to observe that an
-    /// overrun happened -- fetch() itself just reports an empty buffer either way (see fetch()'s
-    /// doc comment), the same as "no data yet". Poll this periodically for monitoring/alerting.
-    [[nodiscard]] TURBOQ_FORCE_INLINE auto overrunCount() const noexcept -> std::size_t {
-        return overrunCount_;
     }
 
     /// Reset queue
@@ -335,8 +338,9 @@ public:
 /// Since the producer can't be held back, MessageHeader carries one extra field a plain SPSC
 /// message doesn't need: `sequence`, a monotonically increasing per-producer counter. A consumer
 /// that reads a sequence it didn't expect knows the slot it just looked at has since been
-/// overwritten -- i.e. it has been lapped -- and counts that via overrunCount() instead of handing
-/// back a stale or out-of-context message. See fetch() below.
+/// overwritten -- i.e. it has been lapped -- and resyncs to the producer's head instead of handing
+/// back a stale message. This is best-effort only: a consumer that falls more than a full ring
+/// behind gets unspecified results (see MessageHeader::sequence for why detection can miss).
 
 template <typename Options>
 class MulticastMessageQueueImpl {

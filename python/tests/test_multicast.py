@@ -35,38 +35,6 @@ def test_consumer_only_sees_messages_sent_after_it_attaches(unique_name):
     assert late_consumer.receive() is None
 
 
-def test_overrun_count_starts_at_zero(unique_name):
-    queue = turboq.MulticastQueue(unique_name(), capacity_hint=1 << 16, anonymous=True)
-    queue.create_producer()
-    consumer = queue.create_consumer()
-
-    assert consumer.overrun_count == 0
-
-
-def test_overrun_is_detected_when_consumer_falls_far_behind(unique_name):
-    # Small ring: easy to lap many times over with a consumer that isn't reading.
-    queue = turboq.MulticastQueue(unique_name(), capacity_hint=4096, anonymous=True)
-    producer = queue.create_producer()
-    consumer = queue.create_consumer()
-
-    payload = b"x" * 32
-
-    # The very first fetch() a consumer ever does only baselines its expected sequence number
-    # (there's nothing to compare against yet), so it can never itself report an overrun -- see
-    # MulticastMessageQueue.h's fetch(). Establish that baseline first, on a message that's still
-    # valid when we read it.
-    assert producer.send(payload) is True
-    assert consumer.receive() == payload
-
-    # Now flood well past the ring's capacity without the consumer reading anything, so the
-    # producer wraps around and overwrites the slot the consumer is still sitting on.
-    for _ in range(512):
-        producer.send(payload)
-
-    assert consumer.receive() is None  # the overwritten slot is reported as empty, not garbage
-    assert consumer.overrun_count > 0
-
-
 def test_reset_rebaselines_the_consumer(unique_name):
     queue = turboq.MulticastQueue(unique_name(), capacity_hint=1 << 16, anonymous=True)
     producer = queue.create_producer()

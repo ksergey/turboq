@@ -21,7 +21,7 @@ endfunction()
 function(TurboQAddTestsFromSourceList)
     set(options)
     set(oneValueArgs PREFIX)
-    set(multiValueArgs LIBS OPTIONS DEFINITIONS)
+    set(multiValueArgs LIBS COMPILE_OPTIONS DEFINITIONS)
 
     cmake_parse_arguments(TQ_PARSED "${options}" "${oneValueArgs}" "${multiValueArgs}" ${ARGN})
 
@@ -32,7 +32,7 @@ function(TurboQAddTestsFromSourceList)
                 set(testName "${TQ_PARSED_PREFIX}-${testName}-test")
 
                 add_executable(${testName} ${TQ_ENTRY})
-                target_compile_options(${testName} PRIVATE ${TQ_PARSED_OPTIONS})
+                target_compile_options(${testName} PRIVATE ${TQ_PARSED_COMPILE_OPTIONS})
                 target_compile_definitions(${testName} PRIVATE ${TQ_PARSED_DEFINITIONS})
                 target_link_libraries(${testName} PRIVATE ${TQ_PARSED_LIBS})
 

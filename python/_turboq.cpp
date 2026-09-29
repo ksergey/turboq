@@ -156,10 +156,6 @@ public:
     [[nodiscard]] std::size_t capacity() const {
         return impl_.capacity();
     }
-
-    [[nodiscard]] std::size_t overrunCount() const {
-        return impl_.overrunCount();
-    }
 };
 
 class MPSCProducer : public ProducerWrapper<turboq::MPSCMessageQueue::Producer> {
@@ -386,17 +382,14 @@ PYBIND11_MODULE(_turboq, m) {
         .def_property_readonly("capacity", &MulticastProducer::capacity)
         .def("send", &MulticastProducer::send, py::arg("payload"),
             "Publish bytes-like payload. Returns False only if the payload can never fit in the "
-            "ring; this queue has no backpressure -- a slow consumer is simply lapped, see "
-            "MulticastConsumer.overrun_count.");
+            "ring; this queue has no backpressure -- a consumer that falls more than a full ring "
+            "behind is lapped and gets unspecified results.");
 
     py::class_<MulticastConsumer>(m, "MulticastConsumer")
         .def("__bool__", &MulticastConsumer::valid)
         .def_property_readonly("capacity", &MulticastConsumer::capacity)
-        .def_property_readonly("overrun_count", &MulticastConsumer::overrunCount,
-            "Cumulative number of times this consumer was lapped by the producer since it was "
-            "created or last reset().")
         .def("receive", &MulticastConsumer::receive,
-            "Dequeue next message as bytes, or None if empty (including right after an overrun).")
+            "Dequeue next message as bytes, or None if empty (including right after a detected lap).")
         .def("reset", &MulticastConsumer::reset);
 
     py::class_<MulticastQueue>(m, "MulticastQueue",
