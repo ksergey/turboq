@@ -27,8 +27,8 @@ struct MemorySource {
 
     /// Get file descriptor for mapping and page size to round up
     /// \param[in] name is memory source name
-    [[nodiscard]] virtual auto open(std::string_view name,
-        OpenFlags flags) const noexcept -> std::expected<std::tuple<File, std::size_t>, std::error_code> = 0;
+    [[nodiscard]] virtual auto open(std::string_view name, OpenFlags flags) const noexcept
+        -> std::expected<std::tuple<File, std::size_t>, std::error_code> = 0;
 };
 
 /// HugePages option selector
@@ -57,15 +57,15 @@ public:
     }
 
     /// \see MemorySource::open
-    [[nodiscard]] auto open(std::string_view name,
-        OpenFlags flags) const noexcept -> std::expected<std::tuple<File, std::size_t>, std::error_code> override;
+    [[nodiscard]] auto open(std::string_view name, OpenFlags flags) const noexcept
+        -> std::expected<std::tuple<File, std::size_t>, std::error_code> override;
 };
 
 /// Anonymous memory source
 struct AnonymousMemorySource final : public MemorySource {
     /// \see MemorySource::open
-    [[nodiscard]] auto open(std::string_view name,
-        OpenFlags flags) const noexcept -> std::expected<std::tuple<File, std::size_t>, std::error_code> override;
+    [[nodiscard]] auto open(std::string_view name, OpenFlags flags) const noexcept
+        -> std::expected<std::tuple<File, std::size_t>, std::error_code> override;
 };
 
 } // namespace turboq

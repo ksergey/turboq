@@ -157,8 +157,8 @@ auto getProcMounts() -> std::vector<MemoryMountPoint> const& {
     return entries;
 }
 
-auto getMountEntry1G(
-    std::vector<MemoryMountPoint> const& mounts) noexcept -> std::expected<MemoryMountPoint, std::error_code> {
+auto getMountEntry1G(std::vector<MemoryMountPoint> const& mounts) noexcept
+    -> std::expected<MemoryMountPoint, std::error_code> {
     auto const found = std::ranges::find_if(mounts, [](auto const& entry) {
         return entry.pageSize == kPageSize1G;
     });
@@ -168,8 +168,8 @@ auto getMountEntry1G(
     return {*found};
 }
 
-auto getMountEntry2M(
-    std::vector<MemoryMountPoint> const& mounts) noexcept -> std::expected<MemoryMountPoint, std::error_code> {
+auto getMountEntry2M(std::vector<MemoryMountPoint> const& mounts) noexcept
+    -> std::expected<MemoryMountPoint, std::error_code> {
     auto const found = std::ranges::find_if(mounts, [](auto const& entry) {
         return entry.pageSize == kPageSize2M;
     });
@@ -179,8 +179,8 @@ auto getMountEntry2M(
     return {*found};
 }
 
-auto getMountEntryDefault(
-    std::vector<MemoryMountPoint> const& mounts) noexcept -> std::expected<MemoryMountPoint, std::error_code> {
+auto getMountEntryDefault(std::vector<MemoryMountPoint> const& mounts) noexcept
+    -> std::expected<MemoryMountPoint, std::error_code> {
     using namespace std::string_view_literals;
 
     auto found = std::ranges::find_if(mounts, [](auto const& entry) {
@@ -197,8 +197,8 @@ auto getMountEntryDefault(
     return {*found};
 }
 
-auto getMountEntryAuto(
-    std::vector<MemoryMountPoint> const& mounts) noexcept -> std::expected<MemoryMountPoint, std::error_code> {
+auto getMountEntryAuto(std::vector<MemoryMountPoint> const& mounts) noexcept
+    -> std::expected<MemoryMountPoint, std::error_code> {
     HugePagesOption type = HugePagesOption::HugePages1G;
 
     for (;;) {
@@ -268,8 +268,8 @@ DefaultMemorySource::DefaultMemorySource(std::filesystem::path const& path, std:
     }
 }
 
-auto DefaultMemorySource::open(std::string_view name,
-    OpenFlags flags) const noexcept -> std::expected<std::tuple<File, std::size_t>, std::error_code> {
+auto DefaultMemorySource::open(std::string_view name, OpenFlags flags) const noexcept
+    -> std::expected<std::tuple<File, std::size_t>, std::error_code> {
     if (flags != OpenFlags::OpenOnly && flags != OpenFlags::OpenOrCreate) {
         return std::unexpected(makePosixErrorCode(EINVAL));
     }
@@ -283,8 +283,8 @@ auto DefaultMemorySource::open(std::string_view name,
     return {std::make_tuple(std::move(result).value(), pageSize_)};
 }
 
-auto AnonymousMemorySource::open(std::string_view name,
-    [[maybe_unused]] OpenFlags flags) const noexcept -> std::expected<std::tuple<File, std::size_t>, std::error_code> {
+auto AnonymousMemorySource::open(std::string_view name, [[maybe_unused]] OpenFlags flags) const noexcept
+    -> std::expected<std::tuple<File, std::size_t>, std::error_code> {
     auto result = File::anonymous(std::string{name}.c_str());
     if (!result) {
         return std::unexpected(result.error());

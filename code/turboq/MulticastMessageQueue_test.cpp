@@ -211,8 +211,8 @@ TEST_SUITE("MulticastMessageQueue") {
     }
 
     TEST_CASE("reset() after being lapped does not resurrect the stale sequence baseline") {
-        auto result = MulticastMessageQueue::makeQueue("lapped-then-reset",
-            MulticastMessageQueue::CreationOptions{.capacityHint = 4096}, AnonymousMemorySource{});
+        auto result = MulticastMessageQueue::makeQueue(
+            "lapped-then-reset", MulticastMessageQueue::CreationOptions{.capacityHint = 4096}, AnonymousMemorySource{});
         REQUIRE(result);
 
         auto queue = std::move(result).value();
