@@ -200,8 +200,10 @@ std::atomic_ref(*reinterpret_cast<bool*>(region.data())).store(true, std::memory
   `capacityHint` rounded up to the page size), so the ring shrinks by that much; creation fails with
   `Error::InvalidCreationOptions` if it leaves no room for messages. For MPSC it is added on top of
   the slots.
-- Options without `reserveSpace` reserve nothing, and their memory layout is exactly what it was
-  before this option existed, so existing queue files keep working.
+- `reserveSpace` is required: custom Options written for an older turboq no longer compile until
+  they add `static constexpr std::size_t reserveSpace{0};` (the default Options already have it).
+  With 0 nothing is reserved and the memory layout is exactly what it was before this option
+  existed, so existing queue files keep working.
 
 ### Python bindings
 

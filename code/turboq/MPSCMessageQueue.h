@@ -26,8 +26,8 @@ template <typename Options>
 struct MPSCMessageQueueLayout {
     static constexpr std::string_view kTag = Options::tag;
 
-    /// Bytes reserved for the user right after the memory header (Options::reserveSpace),
-    /// see reserved() on the producer/consumer
+    /// Bytes reserved for the user right after the memory header, see reserved() on the
+    /// producer/consumer. Every Options must declare reserveSpace (0 for none).
     static constexpr std::size_t kReserveSpace = Options::reserveSpace;
 
     struct MemoryHeader {
@@ -125,7 +125,7 @@ public:
     /// Region of Options::reserveSpace bytes reserved right after the queue header, shared by every
     /// producer and consumer of the queue. Zero-filled when the queue is created; the queue itself
     /// never touches it, so synchronizing access (e.g. with std::atomic_ref) is up to the caller.
-    /// Empty if Options doesn't declare reserveSpace.
+    /// Empty if Options::reserveSpace is 0.
     [[nodiscard]] TURBOQ_FORCE_INLINE auto reserved() noexcept -> std::span<std::byte> {
         return storage_.content().subspan(Layout::kMemoryHeaderBufferSize, Layout::kReserveSpace);
     }
@@ -265,7 +265,7 @@ public:
     /// Region of Options::reserveSpace bytes reserved right after the queue header, shared by every
     /// producer and consumer of the queue. Zero-filled when the queue is created; the queue itself
     /// never touches it, so synchronizing access (e.g. with std::atomic_ref) is up to the caller.
-    /// Empty if Options doesn't declare reserveSpace.
+    /// Empty if Options::reserveSpace is 0.
     [[nodiscard]] TURBOQ_FORCE_INLINE auto reserved() noexcept -> std::span<std::byte> {
         return storage_.content().subspan(Layout::kMemoryHeaderBufferSize, Layout::kReserveSpace);
     }
@@ -344,10 +344,10 @@ public:
 ///   | consumerPos|producerPos|(payload) |(payload) |(payload) |     |(payload) | (1 cache line each)  |
 ///   +------------------------+----------+----------+----------+     +----------+----+----+-----------+
 ///
-/// If Options declares `reserveSpace`, that many bytes (rounded up to a cache line) are reserved
-/// between MemoryHeader and data_ for the user -- see reserved() on the producer/consumer. The
-/// size is recorded in MemoryHeader::reservedSize and checked whenever the queue is opened. Without
-/// it the region is empty and the layout is exactly as drawn.
+/// Options::reserveSpace bytes (rounded up to a cache line) are reserved between MemoryHeader and
+/// data_ for the user -- see reserved() on the producer/consumer. The size is recorded in
+/// MemoryHeader::reservedSize and checked whenever the queue is opened. With reserveSpace = 0 (the
+/// default Options) the region is empty and the layout is exactly as drawn.
 ///
 /// Unlike SPSC/MulticastQueue, this is a *fixed-size circular array* of `length` slots (always a
 /// power of two), not a variable-size byte ring: slot index = producerPos & (length - 1), so a
