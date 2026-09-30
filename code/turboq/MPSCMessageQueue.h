@@ -26,10 +26,17 @@ template <typename Options>
 struct MPSCMessageQueueLayout {
     static constexpr std::string_view kTag = Options::tag;
 
+    /// Bytes reserved for the user right after the memory header (Options::reserveSpace),
+    /// see reserved() on the producer/consumer
+    static constexpr std::size_t kReserveSpace = Options::reserveSpace;
+
     struct MemoryHeader {
         char tag[kTag.size()];
         std::size_t slotSize;
         std::size_t length;
+        // Added after the existing fields, in what used to be padding (zero in files created before
+        // it existed), so older queue files keep their layout.
+        std::size_t reservedSize; // kReservedBufferSize of the Options that created the queue
         alignas(kCacheLineSize) std::size_t consumerPos;
         alignas(kCacheLineSize) std::size_t producerPos;
     };
@@ -51,6 +58,13 @@ struct MPSCMessageQueueLayout {
 
     /// Size of the memory header buffer, aligned to cache line
     static constexpr auto kMemoryHeaderBufferSize = makeCacheLineAligned(sizeof(MemoryHeader));
+
+    /// Size of the reserved region, aligned to cache line: keeps data_ cache-line aligned and the
+    /// region off the cache lines of the queue's own positions (no false sharing)
+    static constexpr auto kReservedBufferSize = makeCacheLineAligned(kReserveSpace);
+
+    /// Offset of the queue data: memory header, then the reserved region
+    static constexpr auto kDataOffset = kMemoryHeaderBufferSize + kReservedBufferSize;
 
     /// Size of the slot header buffer, aligned to cache line
     static constexpr auto kSlotHeaderBufferSize = makeCacheLineAligned(sizeof(SlotHeader));
@@ -99,13 +113,26 @@ public:
         auto content = storage_.content();
         header_ = std::bit_cast<MemoryHeader*>(storage_.data());
 
-        std::size_t offset = Layout::kMemoryHeaderBufferSize;
+        std::size_t offset = Layout::kDataOffset;
         data_ = content.subspan(offset, header_->slotSize * header_->length);
 
         offset += header_->slotSize * header_->length;
         slots_ = {content.data() + offset, header_->length * Layout::kSlotHeaderBufferSize};
 
         consumerPosCache_ = std::atomic_ref(header_->consumerPos).load(std::memory_order_acquire);
+    }
+
+    /// Region of Options::reserveSpace bytes reserved right after the queue header, shared by every
+    /// producer and consumer of the queue. Zero-filled when the queue is created; the queue itself
+    /// never touches it, so synchronizing access (e.g. with std::atomic_ref) is up to the caller.
+    /// Empty if Options doesn't declare reserveSpace.
+    [[nodiscard]] TURBOQ_FORCE_INLINE auto reserved() noexcept -> std::span<std::byte> {
+        return storage_.content().subspan(Layout::kMemoryHeaderBufferSize, Layout::kReserveSpace);
+    }
+
+    /// \overload
+    [[nodiscard]] TURBOQ_FORCE_INLINE auto reserved() const noexcept -> std::span<std::byte const> {
+        return storage_.content().subspan(Layout::kMemoryHeaderBufferSize, Layout::kReserveSpace);
     }
 
     /// Return true on initialized
@@ -222,7 +249,7 @@ public:
         auto content = storage_.content();
         header_ = std::bit_cast<MemoryHeader*>(storage_.data());
 
-        std::size_t offset = Layout::kMemoryHeaderBufferSize;
+        std::size_t offset = Layout::kDataOffset;
         data_ = content.subspan(offset, header_->slotSize * header_->length);
 
         offset += header_->slotSize * header_->length;
@@ -233,6 +260,19 @@ public:
 
         assert((reinterpret_cast<uintptr_t>(data_.data()) & (kCacheLineSize - 1)) == 0);
         assert((reinterpret_cast<uintptr_t>(slots_.data()) & (kCacheLineSize - 1)) == 0);
+    }
+
+    /// Region of Options::reserveSpace bytes reserved right after the queue header, shared by every
+    /// producer and consumer of the queue. Zero-filled when the queue is created; the queue itself
+    /// never touches it, so synchronizing access (e.g. with std::atomic_ref) is up to the caller.
+    /// Empty if Options doesn't declare reserveSpace.
+    [[nodiscard]] TURBOQ_FORCE_INLINE auto reserved() noexcept -> std::span<std::byte> {
+        return storage_.content().subspan(Layout::kMemoryHeaderBufferSize, Layout::kReserveSpace);
+    }
+
+    /// \overload
+    [[nodiscard]] TURBOQ_FORCE_INLINE auto reserved() const noexcept -> std::span<std::byte const> {
+        return storage_.content().subspan(Layout::kMemoryHeaderBufferSize, Layout::kReserveSpace);
     }
 
     /// Return true on initialized
@@ -303,6 +343,11 @@ public:
 ///   | tag | slotSize | length| Slot 0   | Slot 1   | Slot 2   | ... | Slot N-1 | SlotHeader[0..N-1]   |
 ///   | consumerPos|producerPos|(payload) |(payload) |(payload) |     |(payload) | (1 cache line each)  |
 ///   +------------------------+----------+----------+----------+     +----------+----+----+-----------+
+///
+/// If Options declares `reserveSpace`, that many bytes (rounded up to a cache line) are reserved
+/// between MemoryHeader and data_ for the user -- see reserved() on the producer/consumer. The
+/// size is recorded in MemoryHeader::reservedSize and checked whenever the queue is opened. Without
+/// it the region is empty and the layout is exactly as drawn.
 ///
 /// Unlike SPSC/MulticastQueue, this is a *fixed-size circular array* of `length` slots (always a
 /// power of two), not a variable-size byte ring: slot index = producerPos & (length - 1), so a
@@ -382,8 +427,7 @@ public:
         // calculate slot exactly size
         auto const slotSize = Layout::makeCacheLineAligned(options.slotSizeHint);
         auto const length = upperPow2(options.lengthHint);
-        auto const capacityHint =
-            Layout::kMemoryHeaderBufferSize + slotSize * length + Layout::kSlotHeaderBufferSize * length;
+        auto const capacityHint = Layout::kDataOffset + slotSize * length + Layout::kSlotHeaderBufferSize * length;
         // round-up requested size to page size
         auto const capacity = alignUp(capacityHint, pageSize);
 
@@ -410,6 +454,7 @@ public:
             // init queue internals
             auto header = std::bit_cast<MemoryHeader*>(buffer.data());
             std::ranges::copy(Layout::kTag, header->tag);
+            header->reservedSize = Layout::kReservedBufferSize;
             header->slotSize = slotSize;
             header->length = length;
             std::atomic_ref(header->producerPos).store(0, std::memory_order_relaxed);
@@ -421,6 +466,10 @@ public:
         auto header = std::bit_cast<MemoryHeader const*>(buffer.data());
         if (!std::ranges::equal(Layout::kTag, header->tag)) {
             throw std::system_error{makeErrorCode(Error::TagMismatch), "unexpected queue tag value"};
+        }
+        if (header->reservedSize != Layout::kReservedBufferSize) {
+            // same tag, different Options::reserveSpace: the data would start at a different offset
+            throw std::system_error{makeErrorCode(Error::SizeMismatch), "unexpected queue reserved space size"};
         }
 
         file_ = std::move(file);
@@ -454,6 +503,10 @@ public:
         auto header = std::bit_cast<MemoryHeader const*>(buffer.data());
         if (!std::ranges::equal(Layout::kTag, header->tag)) {
             throw std::system_error{makeErrorCode(Error::TagMismatch), "unexpected queue tag value"};
+        }
+        if (header->reservedSize != Layout::kReservedBufferSize) {
+            // same tag, different Options::reserveSpace: the data would start at a different offset
+            throw std::system_error{makeErrorCode(Error::SizeMismatch), "unexpected queue reserved space size"};
         }
 
         file_ = std::move(file);
@@ -512,6 +565,7 @@ public:
 
 struct MPSCMessageQueueOptionsDefault {
     static constexpr std::string_view tag{"turboq/mpsc"};
+    static constexpr std::size_t reserveSpace{0};
 };
 using MPSCMessageQueue = detail::MPSCMessageQueueImpl<MPSCMessageQueueOptionsDefault>;
 

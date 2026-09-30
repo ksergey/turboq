@@ -25,8 +25,13 @@ template <typename Options>
 struct MulticastMessageQueueLayout {
     static constexpr std::string_view kTag = Options::tag;
 
+    /// Bytes reserved for the user right after the memory header (Options::reserveSpace),
+    /// see reserved() on the producer/consumer
+    static constexpr std::size_t kReserveSpace = Options::reserveSpace;
+
     struct MemoryHeader {
         char tag[kTag.size()];
+        std::size_t reservedSize; // kReservedBufferSize of the Options that created the queue
         alignas(kCacheLineSize) std::size_t producerPos;
     };
 
@@ -70,6 +75,13 @@ struct MulticastMessageQueueLayout {
     /// Size of the memory header buffer, aligned to cache line
     /// Contains tag and producerPos fields
     static constexpr auto kMemoryHeaderBufferSize = makeCacheLineAligned(sizeof(MemoryHeader));
+
+    /// Size of the reserved region, aligned to cache line: keeps data_ cache-line aligned and the
+    /// region off the cache lines of the queue's own positions (no false sharing)
+    static constexpr auto kReservedBufferSize = makeCacheLineAligned(kReserveSpace);
+
+    /// Offset of the queue data: memory header, then the reserved region
+    static constexpr auto kDataOffset = kMemoryHeaderBufferSize + kReservedBufferSize;
 
     /// Size of the message header buffer, aligned to cache line
     /// Contains size, payloadOffset, payloadSize, sequence fields
@@ -118,8 +130,21 @@ public:
 
         auto content = storage_.content();
         header_ = std::bit_cast<MemoryHeader*>(storage_.data());
-        data_ = content.subspan(Layout::kMemoryHeaderBufferSize);
+        data_ = content.subspan(Layout::kDataOffset);
         producerPosCache_ = std::atomic_ref(header_->producerPos).load(std::memory_order_acquire);
+    }
+
+    /// Region of Options::reserveSpace bytes reserved right after the queue header, shared by every
+    /// producer and consumer of the queue. Zero-filled when the queue is created; the queue itself
+    /// never touches it, so synchronizing access (e.g. with std::atomic_ref) is up to the caller.
+    /// Empty if Options doesn't declare reserveSpace.
+    [[nodiscard]] TURBOQ_FORCE_INLINE auto reserved() noexcept -> std::span<std::byte> {
+        return storage_.content().subspan(Layout::kMemoryHeaderBufferSize, Layout::kReserveSpace);
+    }
+
+    /// \overload
+    [[nodiscard]] TURBOQ_FORCE_INLINE auto reserved() const noexcept -> std::span<std::byte const> {
+        return storage_.content().subspan(Layout::kMemoryHeaderBufferSize, Layout::kReserveSpace);
     }
 
     /// Return true on initialized
@@ -225,11 +250,24 @@ public:
 
         auto content = storage_.content();
         header_ = std::bit_cast<MemoryHeader*>(content.data());
-        data_ = content.subspan(Layout::kMemoryHeaderBufferSize);
+        data_ = content.subspan(Layout::kDataOffset);
         consumerPosCache_ = std::atomic_ref(header_->producerPos).load(std::memory_order_relaxed);
         producerPosCache_ = consumerPosCache_;
 
         assert((reinterpret_cast<uintptr_t>(data_.data()) & (kCacheLineSize - 1)) == 0);
+    }
+
+    /// Region of Options::reserveSpace bytes reserved right after the queue header, shared by every
+    /// producer and consumer of the queue. Zero-filled when the queue is created; the queue itself
+    /// never touches it, so synchronizing access (e.g. with std::atomic_ref) is up to the caller.
+    /// Empty if Options doesn't declare reserveSpace.
+    [[nodiscard]] TURBOQ_FORCE_INLINE auto reserved() noexcept -> std::span<std::byte> {
+        return storage_.content().subspan(Layout::kMemoryHeaderBufferSize, Layout::kReserveSpace);
+    }
+
+    /// \overload
+    [[nodiscard]] TURBOQ_FORCE_INLINE auto reserved() const noexcept -> std::span<std::byte const> {
+        return storage_.content().subspan(Layout::kMemoryHeaderBufferSize, Layout::kReserveSpace);
     }
 
     /// Return true on initialized
@@ -315,6 +353,11 @@ public:
 ///   +----------------+-----------------------------------------------------------------------+
 ///    cache-line aligned
 ///
+/// If Options declares `reserveSpace`, that many bytes (rounded up to a cache line) are reserved
+/// between MemoryHeader and data_ for the user -- see reserved() on the producer/consumer. The
+/// size is recorded in MemoryHeader::reservedSize and checked whenever the queue is opened. Without
+/// it the region is empty and the layout is exactly as drawn.
+///
 /// s               e   s                      e  s                    e
 /// +---------------+---+--------+-+------------+--+--------+-+----------+-----+----
 /// | MemoryHeader  |xxx| Header |x|Payload     |xx| Header |x| Payload  |xxxxx|uuuu ...
@@ -399,6 +442,10 @@ public:
 
         // align up capacity hint to page size
         auto const capacity = alignUp(options.capacityHint, pageSize);
+        if (capacity <= Layout::kDataOffset + Layout::kMessageHeaderBufferSize) {
+            throw std::system_error{makeErrorCode(Error::InvalidCreationOptions),
+                "capacity hint too small for the queue header and reserved space"};
+        }
 
         if (fileSize == 0) {
             // init queue on created
@@ -423,12 +470,17 @@ public:
             // init queue internals
             auto header = std::bit_cast<MemoryHeader*>(buffer.data());
             std::ranges::copy(Layout::kTag, header->tag);
+            header->reservedSize = Layout::kReservedBufferSize;
             std::atomic_ref(header->producerPos).store(0, std::memory_order_relaxed);
         }
 
         auto header = std::bit_cast<MemoryHeader const*>(buffer.data());
         if (!std::ranges::equal(Layout::kTag, header->tag)) {
             throw std::system_error{makeErrorCode(Error::TagMismatch), "unexpected queue tag value"};
+        }
+        if (header->reservedSize != Layout::kReservedBufferSize) {
+            // same tag, different Options::reserveSpace: the data would start at a different offset
+            throw std::system_error{makeErrorCode(Error::SizeMismatch), "unexpected queue reserved space size"};
         }
 
         file_ = std::move(file);
@@ -462,6 +514,10 @@ public:
         auto header = std::bit_cast<MemoryHeader const*>(buffer.data());
         if (!std::ranges::equal(Layout::kTag, header->tag)) {
             throw std::system_error{makeErrorCode(Error::TagMismatch), "unexpected queue tag value"};
+        }
+        if (header->reservedSize != Layout::kReservedBufferSize) {
+            // same tag, different Options::reserveSpace: the data would start at a different offset
+            throw std::system_error{makeErrorCode(Error::SizeMismatch), "unexpected queue reserved space size"};
         }
 
         file_ = std::move(file);
@@ -520,6 +576,7 @@ public:
 
 struct MulticastMessageQueueOptionsDefault {
     static constexpr std::string_view tag{"turboq/multicast"};
+    static constexpr std::size_t reserveSpace{0};
 };
 using MulticastMessageQueue = detail::MulticastMessageQueueImpl<MulticastMessageQueueOptionsDefault>;
 

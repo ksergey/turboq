@@ -21,6 +21,7 @@ TEST_SUITE("SPSC") {
     // rather than inline inside the "opening a queue created with a different tag fails" test case.
     struct AltSPSCOptions {
         static constexpr std::string_view tag{"turboq/spsc-alt"};
+        static constexpr std::size_t reserveSpace{0};
     };
     using AltSPSCMessageQueue = detail::SPSCMessageQueueImpl<AltSPSCOptions>;
 
@@ -85,6 +86,40 @@ TEST_SUITE("SPSC") {
         }
 
         REQUIRE_FALSE(dequeue(consumer, msg));
+    }
+
+    TEST_CASE("a full queue never overwrites unread messages after wrapping") {
+        // Regression: once the producer had wrapped and was catching up with the consumer from
+        // behind, prepare() could take the wrap-around branch again and write over messages at
+        // the start of the ring that the consumer hadn't read yet.
+        auto result = SPSCMessageQueue::makeQueue(
+            "test", SPSCMessageQueue::CreationOptions{.capacityHint = 4096}, AnonymousMemorySource{});
+        REQUIRE(result);
+
+        auto queue = std::move(result).value();
+        auto producer = queue.createProducer();
+        auto consumer = queue.createConsumer();
+
+        std::uint64_t nextSend = 0;
+        std::uint64_t nextReceive = 0;
+        Message msg;
+        for (std::uint64_t round = 0; round < 1000; ++round) {
+            // fill the queue completely, then free just a little room. The ring holds ~30
+            // messages; the bound only keeps a regression from looping forever (with the bug the
+            // producer never runs out of space).
+            for (std::size_t n = 0; n < 64 && enqueue(producer, Message{.seq = nextSend}); ++n) {
+                ++nextSend;
+            }
+            REQUIRE_FALSE(enqueue(producer, Message{.seq = nextSend}));
+            for (std::uint64_t i = 0; i <= round % 7; ++i) {
+                REQUIRE(dequeue(consumer, msg));
+                REQUIRE_EQ(msg.seq, nextReceive++);
+            }
+        }
+        while (dequeue(consumer, msg)) {
+            REQUIRE_EQ(msg.seq, nextReceive++);
+        }
+        REQUIRE_EQ(nextReceive, nextSend);
     }
 
     TEST_CASE("capacity 0") {

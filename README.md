@@ -14,6 +14,7 @@
 - **Lock-free algorithms** - maximum throughput with no locks
 - **Multiple queue types** - Multicast, SPSC, MPSC queues
 - **Zero-copy operations** - minimal memory overhead
+- **Reserved space** - room for your own shared state inside the queue file
 
 ## Quick Start
 
@@ -165,6 +166,42 @@ A few things worth calling out:
   garbage message; lap detection is best-effort only and there is no reliable way to observe that
   it happened (debug builds assert on the worst case). Size the ring for the worst-case latency of
   your slowest consumer, and put a sequence number in your own payload if you need to detect gaps.
+
+### Custom options and reserved space
+
+Every queue is a template over an `Options` struct; `SPSCMessageQueue`, `MPSCMessageQueue` and
+`MulticastMessageQueue` are just aliases for the default ones. Options declare the queue's `tag`
+(checked whenever the queue is opened, so queues of different kinds can't be mixed up) and
+`reserveSpace`: that many bytes (rounded up to a cache line) are reserved right after the queue
+header for your own state shared by every producer and consumer -- a flag, counters,
+metadata -- without a second shared-memory file:
+
+```cpp
+#include <atomic>
+#include <turboq/SPSCMessageQueue.h>
+
+struct MyQueueOptions {
+    static constexpr std::string_view tag{"myapp/spsc"};
+    static constexpr std::size_t reserveSpace = sizeof(bool);
+};
+using MyQueue = turboq::detail::SPSCMessageQueueImpl<MyQueueOptions>;
+
+// on either side, e.g. the producer signalling it is done
+auto region = producer.reserved(); // std::span<std::byte>, reserveSpace bytes
+std::atomic_ref(*reinterpret_cast<bool*>(region.data())).store(true, std::memory_order_release);
+```
+
+- The region is zero-filled when the queue is created and the queue itself never touches it:
+  synchronizing access (e.g. with `std::atomic_ref`, as above) is up to you. Its start is
+  cache-line aligned.
+- The reserved size is recorded in the queue header, and opening a queue with a different
+  `reserveSpace` (but the same tag) fails with `Error::SizeMismatch`.
+- For SPSC and Multicast the reserved region comes out of `capacityHint` (the file size stays
+  `capacityHint` rounded up to the page size), so the ring shrinks by that much; creation fails with
+  `Error::InvalidCreationOptions` if it leaves no room for messages. For MPSC it is added on top of
+  the slots.
+- Options without `reserveSpace` reserve nothing, and their memory layout is exactly what it was
+  before this option existed, so existing queue files keep working.
 
 ### Python bindings
 
