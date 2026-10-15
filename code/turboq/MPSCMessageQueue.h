@@ -53,7 +53,7 @@ struct MPSCMessageQueueLayout {
     /// Align size to cache line boundary
     /// Used to prevent false sharing between producer and consumer
     static constexpr auto makeCacheLineAligned(std::size_t size) noexcept -> std::size_t {
-        return alignUp(size, kCacheLineSize);
+        return align_up(size, kCacheLineSize);
     }
 
     /// Size of the memory header buffer, aligned to cache line
@@ -426,10 +426,10 @@ public:
 
         // calculate slot exactly size
         auto const slotSize = Layout::makeCacheLineAligned(options.slotSizeHint);
-        auto const length = upperPow2(options.lengthHint);
+        auto const length = std::bit_ceil(options.lengthHint);
         auto const capacityHint = Layout::kDataOffset + slotSize * length + Layout::kSlotHeaderBufferSize * length;
         // round-up requested size to page size
-        auto const capacity = alignUp(capacityHint, pageSize);
+        auto const capacity = align_up(capacityHint, pageSize);
 
         if (fileSize == 0) {
             // init queue on created

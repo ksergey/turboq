@@ -49,7 +49,7 @@ struct SPSCMessageQueueLayout {
     /// Aligns size to cache line boundary
     /// Used to prevent false sharing between producer and consumer
     static constexpr auto makeCacheLineAligned(std::size_t size) noexcept -> std::size_t {
-        return alignUp(size, kCacheLineSize);
+        return align_up(size, kCacheLineSize);
     }
 
     /// Size of the memory header buffer, aligned to cache line
@@ -433,7 +433,7 @@ public:
         auto const fileSize = getFileSizeResult.value();
 
         // align up capacity hint to page size
-        auto const capacity = alignUp(options.capacityHint, pageSize);
+        auto const capacity = align_up(options.capacityHint, pageSize);
         if (capacity <= Layout::kDataOffset + Layout::kMessageHeaderBufferSize) {
             throw std::system_error{makeErrorCode(Error::InvalidCreationOptions),
                 "capacity hint too small for the queue header and reserved space"};
