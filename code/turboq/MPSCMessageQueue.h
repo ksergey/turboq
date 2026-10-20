@@ -398,7 +398,7 @@ public:
         return *this;
     }
 
-    /// Construct mpsc queue (open or create), throws std::runtime_error on error
+    /// Construct mpsc queue (open or create), throws std::system_error on error
     MPSCMessageQueueImpl(std::string_view name, CreationOptions const& options,
         MemorySource const& memorySource = DefaultMemorySource{}) {
         if (options.slotSizeHint == 0) {
@@ -475,7 +475,7 @@ public:
         file_ = std::move(file);
     }
 
-    /// Construct multicast queue (open only), throws std::runtime_error on error
+    /// Construct mpsc queue (open only), throws std::system_error on error
     MPSCMessageQueueImpl(std::string_view name, MemorySource const& memorySource = DefaultMemorySource{}) {
         auto openMemorySourceResult = memorySource.open(name, MemorySource::OpenOnly);
         if (!openMemorySourceResult) {

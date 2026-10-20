@@ -68,7 +68,7 @@ public:
         if (std::filesystem::exists(tempPath_)) {
             std::error_code ec;
             std::filesystem::remove_all(tempPath_, ec);
-            if (!ec) {
+            if (ec) {
                 std::fprintf(
                     stderr, "failed to remove temp directory (%s): %s\n", tempPath_.c_str(), ec.message().c_str());
             }

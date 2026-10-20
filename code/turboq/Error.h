@@ -43,6 +43,9 @@ enum class Error {
     MessageSizeExceedSlotSize,
     ProducerAlreadyExists,
     ConsumerAlreadyExists,
+    InvalidConfig,
+    QueueNotFound,
+    QueueTypeMismatch,
 };
 
 struct ErrorCategory final : public std::error_category {
@@ -61,6 +64,9 @@ struct ErrorCategory final : public std::error_category {
         case Error::MessageSizeExceedSlotSize: return "message size exceed slot size";
         case Error::ProducerAlreadyExists: return "queue producer already exists";
         case Error::ConsumerAlreadyExists: return "queue consumer already exists";
+        case Error::InvalidConfig: return "invalid queue config";
+        case Error::QueueNotFound: return "queue not found in config";
+        case Error::QueueTypeMismatch: return "queue type mismatch config";
         default: return "?";
         }
     }

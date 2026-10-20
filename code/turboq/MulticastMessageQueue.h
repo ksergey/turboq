@@ -418,7 +418,7 @@ public:
         return *this;
     }
 
-    /// Construct multicast queue (open or create), throws std::runtime_error on error
+    /// Construct multicast queue (open or create), throws std::system_error on error
     MulticastMessageQueueImpl(std::string_view name, CreationOptions const& options,
         MemorySource const& memorySource = DefaultMemorySource{}) {
         if (options.capacityHint == 0) {
@@ -486,7 +486,7 @@ public:
         file_ = std::move(file);
     }
 
-    /// Construct multicast queue (open only), throws std::runtime_error on error
+    /// Construct multicast queue (open only), throws std::system_error on error
     MulticastMessageQueueImpl(std::string_view name, MemorySource const& memorySource = DefaultMemorySource{}) {
         auto openMemorySourceResult = memorySource.open(name, MemorySource::OpenOnly);
         if (!openMemorySourceResult) {

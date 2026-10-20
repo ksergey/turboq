@@ -25,7 +25,7 @@ def test_preserves_message_order_and_boundaries(unique_name):
     consumer = queue.create_consumer()
 
     # Note: a genuinely empty (zero-length) payload is deliberately not covered here -- see
-    # "Zero-length messages" in python/README.md, it's indistinguishable from "queue empty" by
+    # the Python bindings notes in README.md -- it's indistinguishable from "queue empty" by
     # design all the way down in turboq's fetch().
     messages = [b"first", b"second", b"third message, a bit longer this time"]
     for message in messages:
@@ -37,7 +37,7 @@ def test_preserves_message_order_and_boundaries(unique_name):
 
 
 def test_zero_length_payload_is_indistinguishable_from_empty_queue(unique_name):
-    # Documents a real limitation (see python/README.md "Zero-length messages"): turboq's fetch()
+    # Documents a real limitation (see the Python bindings notes in README.md): turboq's fetch()
     # uses an empty span as its sole "nothing to read" sentinel, all the way from the C++ layer up
     # through this binding's receive(). A zero-byte message sent successfully still comes back as
     # None, exactly like an empty queue -- there is no way to tell the two apart.
