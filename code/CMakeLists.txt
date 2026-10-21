@@ -12,8 +12,6 @@ target_compile_options(${TargetName}
     PUBLIC -Wall -Wextra -Wattributes -Wpedantic -Wstrict-aliasing -Wcast-align -g -fno-rtti)
 target_include_directories(${TargetName}
     PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
-target_link_libraries(${TargetName}
-    PRIVATE nlohmann_json::nlohmann_json)
 
 if (turboq_SANITIZER AND turboq_TSAN)
     message(FATAL_ERROR "turboq_SANITIZER (ASan/UBSan/LeakSanitizer) and turboq_TSAN (ThreadSanitizer) "
@@ -39,10 +37,11 @@ file(GLOB_RECURSE Sources "${CMAKE_CURRENT_SOURCE_DIR}/turboq/*.cpp")
 file(GLOB_RECURSE Headers "${CMAKE_CURRENT_SOURCE_DIR}/turboq/*.h")
 
 if (turboq_BUILD_TESTS)
+    find_package(Threads REQUIRED)
     TurboQAddTestsFromSourceList(Sources
         PREFIX ${TargetName}
         COMPILE_OPTIONS -Wall -Wextra -g
-        LIBS doctest::doctest_with_main ${TargetName})
+        LIBS doctest::doctest_with_main Threads::Threads ${TargetName})
 endif()
 
 TurboQAddBenchmarksFromSourceList(Sources

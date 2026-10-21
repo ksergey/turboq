@@ -11,9 +11,6 @@ option(turboq_TOOLS "Build tools (requires cxxopts, fetched via CPM)" ON)
 include(cmake/TurboQHelpers.cmake)
 include(cmake/GetCPM.cmake)
 
-# JSON parser for QueueManager; header-only and used only inside QueueManager.cpp
-CPMAddPackage("gh:nlohmann/json@3.12.0")
-
 if (turboq_BUILD_TESTS)
     CPMAddPackage("gh:doctest/doctest@2.5.2")
     enable_testing()
@@ -22,6 +19,7 @@ endif()
 add_subdirectory(code)
 
 if (turboq_TOOLS)
+    CPMAddPackage("gh:nlohmann/json@3.12.0")
     add_subdirectory(tools)
 endif()
 
