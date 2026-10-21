@@ -14,7 +14,6 @@ Latency is the product: every change to a queue's hot path must be justified in 
 | `code/turboq/TestUtils.h` | `enqueue`/`dequeue`/`fetch` helpers and `MemorySourceFixture` |
 | `code/turboq/Concepts.h` | `Producer` / `Consumer` concepts every queue side must satisfy |
 | `code/turboq/Error.h` | `turboq::Error` enum + error categories |
-| `code/turboq/QueueManager.{h,cpp}` | JSON queue config: `QueueSpec`, `QueueManager::get<Q>(name)`, open-only or open-or-create per construction tag |
 | `tools/latency_bench.cpp` | Inter-process latency benchmark (producer or consumer per run); `tools/Common.h` helpers |
 | `python/_turboq.cpp` | pybind11 module `_turboq`; `python/turboq/__init__.py` re-exports it |
 | `python/tests/` | pytest suite for the bindings |
@@ -26,8 +25,8 @@ Latency is the product: every change to a queue's hot path must be justified in 
 - **GCC 14+ or Clang 20+** is required (`<print>`, `<expected>`, C++23). GCC 13 fails on
   `#include <print>`; always pass the compiler explicitly if the system default is older.
 - CMake 3.24+, Ninja recommended.
-- The first configure needs network access: CPM fetches nlohmann/json (always), doctest, cxxopts
-  and (with `turboq_PYTHON=ON`) pybind11. Set `CPM_SOURCE_CACHE` to reuse downloads across build dirs.
+- The first configure needs network access: CPM fetches doctest, cxxopts and (with
+  `turboq_PYTHON=ON`) pybind11. Set `CPM_SOURCE_CACHE` to reuse downloads across build dirs.
 
 ## Build and test
 
@@ -92,8 +91,6 @@ and ASan builds. If you touched `python/`, run the Python suite too.
   `kConstant` for constants, `TURBOQ_` prefix for macros. Implementation templates live in
   `turboq::detail` (`...Impl<Options>`); public names are aliases over a `...OptionsDefault`.
 - Hot-path members use `TURBOQ_FORCE_INLINE`; cold paths can use `TURBOQ_COLD`.
-- nlohmann/json is a PRIVATE dependency used only in `QueueManager.cpp`; never include it from a
-  public header.
 - Don't add free functions named `toString` in `namespace turboq`: doctest stringifies values via
   unqualified `toString(...)`, and ADL picks ours up and breaks every `REQUIRE_EQ` on turboq types.
 - The library is built with `-fno-rtti` (propagated as a PUBLIC flag): no `dynamic_cast`/`typeid`.

@@ -14,14 +14,16 @@
 #include <print>
 #include <system_error>
 
-#ifndef MFD_CLOEXEC
-#include <syscall.h>
+// memfd_create(2) is in the kernel since 3.17, but the libc wrapper came much later: glibc 2.27, and
+// Android's Bionic only from API level 30 (Bionic defines MFD_CLOEXEC regardless, so the macro can't
+// tell whether the wrapper is declared). Where the wrapper may be missing, call the syscall directly.
+#if (defined(__ANDROID__) && __ANDROID_API__ < 30) || !defined(MFD_CLOEXEC)
+#include <sys/syscall.h>
+#define TURBOQ_MEMFD_CREATE_SYSCALL 1
+#endif
 
-auto memfd_create(const char* name, unsigned int flags) -> int {
-    // Shouldn't work on linux before 3.17
-    return syscall(__NR_memfd_create, name, flags);
-}
-#define MFD_CLOEXEC FD_CLOEXEC
+#ifndef MFD_CLOEXEC
+#define MFD_CLOEXEC 0x0001U // <linux/memfd.h>
 #endif
 
 #ifndef F_OFD_SETLK
@@ -35,6 +37,14 @@ auto memfd_create(const char* name, unsigned int flags) -> int {
 
 namespace turboq {
 namespace {
+
+auto createMemFd(char const* name, unsigned int flags) noexcept -> int {
+#ifdef TURBOQ_MEMFD_CREATE_SYSCALL
+    return static_cast<int>(::syscall(__NR_memfd_create, name, flags));
+#else
+    return ::memfd_create(name, flags);
+#endif
+}
 
 constexpr auto makeOpenFlags(OpenMode openMode) noexcept -> int {
     int flags = 0;
@@ -149,7 +159,7 @@ auto File::temporary(std::filesystem::path const& path) noexcept -> std::expecte
 }
 
 auto File::anonymous(char const* name) noexcept -> std::expected<File, std::error_code> {
-    int fd = ::memfd_create(name, MFD_CLOEXEC);
+    int fd = createMemFd(name, MFD_CLOEXEC);
     if (fd == -1) {
         return std::unexpected(makePosixErrorCode(errno));
     }

@@ -19,7 +19,6 @@ endif()
 add_subdirectory(code)
 
 if (turboq_TOOLS)
-    CPMAddPackage("gh:nlohmann/json@3.12.0")
     add_subdirectory(tools)
 endif()
 

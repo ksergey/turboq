@@ -26,7 +26,6 @@ The rest is fetched automatically at configure time via [CPM.cmake](https://gith
 
 - [doctest](https://github.com/doctest/doctest) -- builds and runs the unit tests (`code/turboq/*_test.cpp`); skipped entirely when `-Dturboq_BUILD_TESTS=OFF` (see below)
 - [cxxopts](https://github.com/jarro2783/cxxopts) -- command-line parsing for `tools/latency_bench`
-- [nlohmann/json](https://github.com/nlohmann/json) -- parses the queue config file (`QueueManager`, see below); header-only and used only inside `QueueManager.cpp`, so it never appears in turboq's public headers
 
 CPM itself is bootstrapped by `cmake/GetCPM.cmake`, which downloads a small `.cmake` script from
 GitHub on first configure and caches it in the build directory (or under `$CPM_SOURCE_CACHE`, if
