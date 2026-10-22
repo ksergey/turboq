@@ -4,9 +4,9 @@ project(turboq CXX)
 
 option(turboq_SANITIZER "Build with sanitizer" OFF)
 option(turboq_TSAN "Build with ThreadSanitizer" OFF)
-option(turboq_BUILD_TESTS "Build tests (*_test.cpp files, linked against doctest)" ON)
+option(turboq_BUILD_TESTS "Build tests (*_test.cpp files, linked against doctest)" ${PROJECT_IS_TOP_LEVEL})
 option(turboq_PYTHON "Build Python bindings (requires pybind11, fetched via CPM)" OFF)
-option(turboq_TOOLS "Build tools (requires cxxopts, fetched via CPM)" ON)
+option(turboq_TOOLS "Build tools (requires cxxopts, fetched via CPM)" ${PROJECT_IS_TOP_LEVEL})
 
 include(cmake/TurboQHelpers.cmake)
 include(cmake/GetCPM.cmake)
