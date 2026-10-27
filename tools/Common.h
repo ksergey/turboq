@@ -59,13 +59,15 @@ inline constexpr bool kTscSupported = false;
 ///    all x86_64 hardware from the last ~15 years, and required reading if you're pinning
 ///    producer/consumer to different cores/sockets via taskset per the README's tuning section --
 ///    check for the constant_tsc and nonstop_tsc flags in /proc/cpuinfo if in doubt).
-[[nodiscard]] inline auto readTsc() noexcept -> std::uint64_t {
-    if constexpr (kTscSupported) {
-        return __builtin_ia32_rdtsc();
-    } else {
-        return 0;
-    }
+#if defined(__x86_64__) || defined(__i386__)
+[[nodiscard]] TURBOQ_FORCE_INLINE auto readTsc() noexcept -> std::uint64_t {
+    return __builtin_ia32_rdtsc();
 }
+#else
+[[nodiscard]] TURBOQ_FORCE_INLINE auto readTsc() noexcept -> std::uint64_t {
+    return 0;
+}
+#endif
 
 /// One-time, per-process calibration of the TSC's tick rate against the (trusted) steady_clock,
 /// needed to convert a raw readTsc() delta into nanoseconds. Takes ~50ms; construct once at
