@@ -39,12 +39,10 @@ struct Message {
 /// below for why the tsc option needs extra care on the reading side.
 enum class ClockSource { Wall, Tsc };
 
-#if defined(__x86_64__) || defined(__i386__)
-inline constexpr bool kTscSupported = true;
-#else
-inline constexpr bool kTscSupported = false;
-#endif
-
+/// TSC raw-tick read support: exactly one gate, via __has_builtin (GCC 10+/Clang; the toolchain
+/// floor here is much higher). The arch-specific RDTSC builtin exists and is declared only where
+/// the instruction exists, so nothing needs to #if defined(__x86_64__) by hand.
+///
 /// Raw TSC tick count via the plain (non-serializing) RDTSC instruction. Cheaper than
 /// clock_gettime() (no vDSO/syscall, just a handful of cycles), which is the whole point of
 /// offering it -- but the ticks it returns are NOT nanoseconds and are only meaningful compared
@@ -59,11 +57,15 @@ inline constexpr bool kTscSupported = false;
 ///    all x86_64 hardware from the last ~15 years, and required reading if you're pinning
 ///    producer/consumer to different cores/sockets via taskset per the README's tuning section --
 ///    check for the constant_tsc and nonstop_tsc flags in /proc/cpuinfo if in doubt).
-#if defined(__x86_64__) || defined(__i386__)
+#if __has_builtin(__builtin_ia32_rdtsc)
+inline constexpr bool kTscSupported = true;
+
 [[nodiscard]] TURBOQ_FORCE_INLINE auto readTsc() noexcept -> std::uint64_t {
     return __builtin_ia32_rdtsc();
 }
 #else
+inline constexpr bool kTscSupported = false;
+
 [[nodiscard]] TURBOQ_FORCE_INLINE auto readTsc() noexcept -> std::uint64_t {
     return 0;
 }
